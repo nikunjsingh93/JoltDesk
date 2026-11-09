@@ -10,6 +10,18 @@ A standalone desktop GUI with **Pi-Bolt built in**, connected through its stream
 
 This delivery targets Windows ARM64 only. It contains its own engine and needs no existing Pi-Bolt installation.
 
+## Screenshots
+
+Screenshots use a demo workspace and simulated model connections.
+
+### Chat workspace
+
+![JoltDesk showing project chats, an expanded thinking panel, highlighted JavaScript, and the edited file in the right sidebar](docs/screenshots/workspace.png)
+
+### API connections
+
+![JoltDesk settings showing both a local Qwen API and an OpenAI API marked connected](docs/screenshots/connections.png)
+
 ## Code scrolling, file actions and web access in 0.10.6
 
 Streaming code holds your scroll position when you move up. Return to the bottom to follow new lines. The Files panel shows the last modification time from disk, and clicking or right-clicking a completed file opens its menu with **Open with…** and **Show in folder**.
