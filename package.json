@@ -1,0 +1,86 @@
+{
+  "name": "joltdesk",
+  "version": "0.10.9",
+  "private": true,
+  "type": "module",
+  "description": "A desktop workspace for local and remote AI models, powered by Pi-Bolt.",
+  "main": "desktop.cjs",
+  "scripts": {
+    "start": "node launch.mjs",
+    "web": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "dist": "electron-builder --dir",
+    "portable": "electron-builder --win portable",
+    "build:ui": "node build-ui.mjs",
+    "bundle:engine": "node bundle-engine.mjs",
+    "preportable": "node verify-bundle.mjs",
+    "predist": "node verify-bundle.mjs",
+    "prestart": "node ensure-engine.mjs",
+    "preweb": "node ensure-engine.mjs"
+  },
+  "dependencies": {
+    "dompurify": "^3.2.7",
+    "express": "^5.1.0",
+    "extract-zip": "^2.0.1",
+    "highlight.js": "^11.11.1",
+    "marked": "^16.4.1",
+    "tar": "^7.5.22",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.28.2"
+  },
+  "build": {
+    "appId": "local.bolt.desktop",
+    "productName": "JoltDesk",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop.cjs",
+      "server.mjs",
+      "rpc.mjs",
+      "approval.ts",
+      "public/**/*",
+      "package.json",
+      "engine-updater.mjs",
+      "connections.mjs",
+      "web-tools.cjs",
+      "LICENSE",
+      "licenses/highlight.js.txt",
+      "desktop-profile.cjs"
+    ],
+    "asarUnpack": [
+      "approval.ts"
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "public/joltdesk-icon.ico"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "artifactName": "JoltDesk-${version}-${os}-${arch}.${ext}",
+    "extraResources": [
+      {
+        "from": "engine-bundle",
+        "to": "pi-bolt",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "compression": "normal"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nikunjsingh93/JoltDesk.git"
+  }
+}

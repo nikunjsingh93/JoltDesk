@@ -1,0 +1,31 @@
+import {_electron,expect} from '@playwright/test';
+import path from 'node:path';
+import {startServer} from '../server.mjs';
+const dir=path.resolve('work/chat-settings-ui-'+Date.now());const server=await startServer({dataDir:dir,autoStartUpdates:false});
+const env={...process.env,BOLT_TEST_URL:server.url,BOLT_DATA_DIR:dir};delete env.ELECTRON_RUN_AS_NODE;let app;
+try{
+ app=await _electron.launch(process.env.BOLT_TEST_PACKAGED?{executablePath:'release/win-arm64-unpacked/JoltDesk.exe',args:[],env}:{args:['test/ui-shell.cjs'],env});const page=await app.firstWindow();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.locator('#settings').click();await expect(page.locator('#settings-dialog')).toBeVisible();
+ await page.locator('#settings-dialog').evaluate(el=>el.scrollTop=el.scrollHeight);
+ const close=page.getByRole('button',{name:'Close settings',exact:true});await expect(close).toBeInViewport();
+ const dialog=await page.locator('#settings-dialog').boundingBox(),x=await close.boundingBox();if(x.y<dialog.y||x.y+x.height>dialog.y+dialog.height)throw new Error('Close button scrolled outside settings');
+ await close.click();await expect(page.locator('#settings-dialog')).not.toBeVisible();
+ await page.locator('#settings').click();await page.locator('#context-window').count();
+ await page.locator('#settings-dialog').click({position:{x:20,y:70}});await expect(page.locator('#settings-dialog')).toBeVisible();
+ await page.mouse.click(5,5);await expect(page.locator('#settings-dialog')).not.toBeVisible();
+ const chat=await page.evaluate(async()=>{const r=await fetch('/api/chats',{method:'POST',headers:{'X-Bolt-Token':window.BOLT_TOKEN,'Content-Type':'application/json'},body:'{}'});return r.json();});await page.reload();
+ await page.locator('.chat-actions').click();await expect(page.locator('#chat-menu')).toBeVisible();await expect(page.locator('dialog[open]')).toHaveCount(0);
+ await page.keyboard.press('ArrowDown');await expect(page.locator('#delete-chat')).toBeFocused();await page.keyboard.press('Escape');await expect(page.locator('#chat-menu')).not.toBeVisible();await expect(page.locator('.chat-actions')).toBeFocused();
+ await page.locator('.chat-actions').click();await page.mouse.click(500,80);await expect(page.locator('#chat-menu')).not.toBeVisible();
+ await page.locator('.chat-actions').click();await page.locator('#rename-chat').click();await expect(page.locator('#delete-chat-dialog')).not.toBeVisible();await page.locator('#rename-chat-title').fill('My Qwen project');await page.locator('#rename-chat-form button[type=submit]').click();
+ await expect(page.locator('.open-chat')).toContainText('My Qwen project');await page.reload();await expect(page.locator('.open-chat')).toContainText('My Qwen project');
+ const history=page.waitForResponse(r=>r.url().includes('/history'));await page.locator('.open-chat').click();await history;await expect(page.locator('#chat-title')).toHaveText('My Qwen project');
+ await page.locator('.chat-actions').click();await page.screenshot({path:'work/screenshots/joltdesk-chat-menu.png'});await page.locator('#delete-chat').click();await expect(page.locator('#chat-actions-dialog')).not.toBeVisible();await expect(page.locator('#delete-chat-name')).toHaveText('My Qwen project');await page.locator('#cancel-delete-chat').click();await expect(page.locator('.open-chat')).toHaveCount(1);
+ await page.locator('.chat-actions').click();await page.locator('#delete-chat').click();await page.locator('#confirm-delete-chat').click();await expect(page.locator('#delete-chat-dialog')).not.toBeVisible();await expect(page.locator('.open-chat')).toHaveCount(0);await expect(page.locator('#welcome')).toBeVisible();
+ await expect(page.locator('#toast')).toHaveText('Chat deleted.');
+ const toastAtTopCenter=await page.locator('#toast').evaluate(el=>{const box=el.getBoundingClientRect();return box.top>=0&&box.top<40&&Math.abs(box.x+box.width/2-innerWidth/2)<2;});
+ if(!toastAtTopCenter)throw new Error('Chat deletion notification is not at the top center');
+ await page.reload();await expect(page.locator('.open-chat')).toHaveCount(0);
+ if(errors.length)throw new Error(errors.join('\n'));
+ console.log('PASS: settings sticky X, inside clicks, outside dismissal; rename persists; cancel/delete active chat and reload.');
+}finally{await app?.close();server.close();}

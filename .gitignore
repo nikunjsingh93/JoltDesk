@@ -1,0 +1,13 @@
+node_modules/
+.bolt-data/
+release/
+test-results/
+playwright-report/
+engine-bundle/
+work/
+.env
+.env.*
+credential.bin
+Local State
+workspace.json
+diagnostics*.jsonl

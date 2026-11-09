@@ -1,0 +1,33 @@
+import { _electron, expect } from '@playwright/test';
+import {promises as fs} from 'node:fs';
+import path from 'node:path';
+import {mockProvider,testModel} from './mock-provider.mjs';
+const dir=path.resolve('work/standalone-'+Date.now()),provider=await mockProvider();
+await fs.mkdir(path.join(dir,'agent'),{recursive:true});
+await fs.writeFile(path.join(dir,'agent','models.json'),JSON.stringify({providers:{openai:{baseUrl:provider.url,models:[testModel]}}}));
+const env={...process.env,BOLT_DATA_DIR:dir,PI_BOLT_PATH:'C:\\no-external-engine\\pi-bolt.exe',PATH:'C:\\Windows\\System32;C:\\Windows'};delete env.ELECTRON_RUN_AS_NODE;
+const buildArch=process.env.BOLT_TEST_ARCH||'arm64';
+let app;const errors=[];
+try{
+  const buildDir=buildArch==='x64'?'win-unpacked':'win-arm64-unpacked';
+  app=await _electron.launch({executablePath:`release/${buildDir}/JoltDesk.exe`,args:[],env});const page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));
+  await expect(page).toHaveTitle('JoltDesk');
+  await expect(page.locator('.brand')).toContainText('JoltDesk');
+  await expect(page.locator('link[rel=icon]')).toHaveAttribute('href','/joltdesk-icon.svg');
+  await page.locator('#settings').click();await expect(page.locator('#engine-panel')).toBeVisible();await expect(page.locator('#engine-source')).toContainText('Built in');
+  const config=await page.evaluate(async()=>{const r=await fetch('/api/config',{headers:{'X-Bolt-Token':window.BOLT_TOKEN}});return r.json();});
+  const expected=path.resolve(`release/${buildDir}/resources/pi-bolt/pi-bolt.exe`);
+  if(config.binary.toLowerCase()!==expected.toLowerCase())throw new Error('Packaged app selected an external engine: '+config.binary);
+  await page.locator('#check-engine').click();await expect(page.locator('#engine-update-status')).toContainText(/up to date|bolt-v[\d.]+ is available/,{timeout:30000});
+  await page.locator('#auto-engine').uncheck();await expect(page.locator('#auto-engine')).not.toBeChecked();
+  await page.screenshot({path:'work/screenshots/joltdesk-bundled-settings.png'});
+  await page.locator('#auto-engine').check();
+  await app.evaluate(()=>{const original=globalThis.fetch;globalThis.fetch=(url,opts)=>String(url)==='https://api.openai.com/v1/models'?Promise.resolve(new Response(JSON.stringify({data:[{id:'bolt-test'}]}),{headers:{'Content-Type':'application/json'}})):original(url,opts);});
+  await page.locator('#api-key').fill('sk-test-not-real');await page.locator('#connect-button').click();await expect(page.locator('#settings-dialog')).not.toBeVisible();
+  await page.locator('#prompt').fill('Verify that the bundled engine streams responses.');await page.locator('#send').click();await expect(page.locator('.markdown pre code')).toContainText('Hello, Bolt',{timeout:20000});await expect(page.locator('#send')).not.toHaveClass(/running/);
+  await page.locator('#permission').selectOption('ask');await expect(page.locator('#permission')).toHaveValue('ask');provider.tool('write',{path:'bundled-approved.txt',content:'packaged approval passed'});
+  await page.locator('#prompt').fill('Test the packaged approval extension.');await page.locator('#send').click();await expect(page.locator('#approval-dialog')).toBeVisible();await page.locator('#allow').click();await expect(page.locator('#send')).not.toHaveClass(/running/,{timeout:20000});
+  if(await fs.readFile(path.join(dir,'workspace','bundled-approved.txt'),'utf8')!=='packaged approval passed')throw new Error('Packaged approval failed');
+  if(errors.length)throw new Error(errors.join('\n'));
+  console.log('STANDALONE PASS: bundled absolute engine path, empty Pi-Bolt PATH, live official update check, automatic-check toggle, streamed model response and packaged tool approval.');
+}finally{await app?.close();provider.close();}

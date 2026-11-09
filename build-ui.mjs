@@ -1,0 +1,2 @@
+import { build } from 'esbuild';
+await build({stdin:{contents:"import hljs from 'highlight.js/lib/common'; import powershell from 'highlight.js/lib/languages/powershell'; import dos from 'highlight.js/lib/languages/dos'; hljs.registerLanguage('powershell', powershell); hljs.registerLanguage('dos', dos); window.hljs = hljs;",resolveDir:process.cwd()},bundle:true,minify:true,platform:'browser',outfile:'public/highlight.js'});
