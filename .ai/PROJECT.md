@@ -36,6 +36,7 @@ npm run portable -- --arm64
 
 - The supported release target is Windows ARM64. Electron is ARM64. The bundled upstream Windows x64 Pi-Bolt engine runs under Windows emulation. Verify both the packaged app and the embedded engine before releasing.
 - The JoltDesk rename keeps the old Windows app ID and opens existing Bolt Desktop data in place. Keeping the existing profile directory also keeps its encrypted credential store together. Fresh installations use `joltdesk`.
+- The Windows portable build registers the outer executable as its taskbar relaunch command and icon source before showing the window. Its temporary Electron executable is removed on exit. Pins made before this fix need to be recreated.
 - Saved connection identity matters. Distinct APIs can expose the same model ID, so keep model selection, keys, and active requests scoped to their chat’s endpoint.
 - Keep thinking effort, thinking budget, and total output limits separate. Qwen3.6 provides On/Off, while Qwen3.8 can expose distinct efforts. A supported Splash connection can enforce a per-request thinking budget. Unsloth Studio exposes a GGUF model-load budget, and the OpenAI-compatible route tested during development did not honor the attempted per-request budget.
 - Some servers return the resident model’s properties for every model query. Match the reported model identity before applying those properties.

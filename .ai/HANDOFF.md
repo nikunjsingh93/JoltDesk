@@ -4,7 +4,7 @@ Updated November 9, 2026 by Codex.
 
 ## Current state
 
-JoltDesk 0.10.9 is the public rebrand of Bolt Desktop. The app uses the existing bolt mark, and the renamed desktop entry point reuses existing profiles in place. The [first public release](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.10.9) is available for Windows ARM64.
+JoltDesk 0.10.10 fixes Windows ARM64 taskbar pinning in the [portable release](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.10.10). The app uses the existing bolt mark and reuses existing Bolt Desktop profiles in place.
 
 ## Recently completed
 
@@ -13,6 +13,7 @@ JoltDesk 0.10.9 is the public rebrand of Bolt Desktop. The app uses the existing
 - Replaced machine-specific probes with an opt-in live discovery check and moved fixture output into the ignored `work/` directory.
 - Added the shared agent instructions and these project notes.
 - Added workspace and connection screenshots to the README using an isolated profile and simulated APIs.
+- Registered the portable launcher as the Windows taskbar icon and relaunch target. Older pins need to be recreated.
 
 ## Important files
 
@@ -28,7 +29,7 @@ JoltDesk 0.10.9 is the public rebrand of Bolt Desktop. The app uses the existing
 - The opt-in API check passed against a local fixture with a fake key.
 - The packaged smoke test verified JoltDesk branding, the bundled engine, the update check, streaming, and file approval.
 - Verified the packaged ARM64 executable, the portable launcher icon, and the app, Highlight.js, and Pi-Bolt license files.
-- Confirmed that GitHub marks `v0.10.9` as latest and that the asset matches the local build. The SHA-256 is `38b2564df784605b81ff34be9a91b6a7bddef8bd9776bea03b6e97841cc8604a`.
+- Ran the 22 backend checks and packaged smoke test again for `v0.10.10`. Read the portable window's native Windows taskbar properties and verified that its icon source and relaunch target survive app shutdown. The local asset SHA-256 is `2c28ed8346a66427ff0ad2e9c5e6dc4e09eb587a15ac2ca2bfe3378deca841b9`.
 
 ## Next step
 

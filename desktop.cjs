@@ -4,8 +4,8 @@ const {spawn}=require('node:child_process');
 const {createWebTools}=require('./web-tools.cjs');
 const {desktopDataDir}=require('./desktop-profile.cjs');
 let backend,mainWindow;
-// Keep the existing Windows taskbar identity and reuse a legacy profile in place.
-if(process.platform==='win32')app.setAppUserModelId('local.bolt.desktop');
+const windowsAppId='local.bolt.desktop';
+if(process.platform==='win32')app.setAppUserModelId(windowsAppId);
 const dataPath=desktopDataDir(app.getPath('appData'),process.env.BOLT_DATA_DIR);
 require('node:fs').mkdirSync(dataPath,{recursive:true});
 app.setPath('userData',dataPath);
@@ -41,8 +41,19 @@ app.whenReady().then(async()=>{
     }
   };
   backend=await startServer({dataDir,vault,engineDir:app.isPackaged?path.join(process.resourcesPath,'pi-bolt'):undefined,requireBundled:app.isPackaged,native});
-  const window=new BrowserWindow({width:1360,height:900,minWidth:760,minHeight:600,title:'JoltDesk',icon:path.join(__dirname,'public','joltdesk-icon.png'),backgroundColor:'#151515',autoHideMenuBar:true,webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true}});
+  const portableLauncher=process.platform==='win32'&&app.isPackaged?process.env.PORTABLE_EXECUTABLE_FILE:undefined;
+  const window=new BrowserWindow({width:1360,height:900,minWidth:760,minHeight:600,title:'JoltDesk',icon:path.join(__dirname,'public','joltdesk-icon.png'),backgroundColor:'#151515',autoHideMenuBar:true,show:!portableLauncher,webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true}});
   mainWindow=window;
+  if(portableLauncher){
+    // The portable launcher deletes the extracted Electron executable when it exits.
+    window.setAppDetails({
+      appId:windowsAppId,
+      appIconPath:portableLauncher,
+      relaunchCommand:`"${portableLauncher}"`,
+      relaunchDisplayName:'JoltDesk'
+    });
+    window.show();
+  }
   window.webContents.setWindowOpenHandler(({url})=>{if(/^https?:\/\//.test(url))shell.openExternal(url);return {action:'deny'};});
   window.webContents.on('will-navigate',(event,url)=>{if(new URL(url).origin!==backend.url)event.preventDefault();});
   await window.loadURL(backend.url);
