@@ -21,7 +21,11 @@ const server=await startServer({
     webTools:async(kind,input)=>{
       webRequests.push({kind,input});
       return kind==='search'?{sources:[source]}:{...source,text:'Example page text.',links:[]};
-    }
+    },
+    browser:{agent:async(kind,input)=>{
+      webRequests.push({kind,input});
+      return {...source,text:'Rendered page text.',links:[]};
+    }}
   }
 });
 const env={...process.env,BOLT_TEST_URL:server.url,BOLT_DATA_DIR:dir};
@@ -51,7 +55,7 @@ try{
   const file=page.locator('[data-file-path="example file.txt"]');
   await expect(file.locator('time')).toContainText('Last edited');
   const modified=await fs.stat(path.join(dir,'workspace','example file.txt'));
-  assert.equal(await file.locator('time').getAttribute('datetime'),modified.mtime.toISOString());
+  assert.equal(await file.locator('time').getAttribute('datetime'),new Date(modified.mtimeMs).toISOString());
   await file.locator('button').click({button:'right'});
   await page.locator('[data-file-action="reveal"]').click();
   await expect.poll(()=>actions.length).toBe(1);
@@ -72,10 +76,17 @@ try{
   await send('Read that page.');
   assert.deepEqual(webRequests[1],{kind:'browse',input:{url:source.url}});
   assert.ok(provider.requests.some(body=>declared(body).includes('browse_page')));
+  provider.tool('browser_open',{url:source.url});
+  await send('Open that page in the browser.');
+  assert.deepEqual(webRequests[2],{kind:'browser-open',input:{url:source.url}});
+  provider.tool('browser_read',{});
+  await send('Read the page I have open.');
+  assert.deepEqual(webRequests[3],{kind:'browser-read',input:{}});
+  assert.ok(provider.requests.some(body=>declared(body).includes('browser_read')));
   await page.reload();
   await page.locator('.open-chat').click();
   await expect(page.locator('#web-tools')).toBeChecked();
-  console.log('FILES AND WEB UI PASS: real file modification time, left and right-click actions, optional web tools, sources and persistence.');
+  console.log('FILES AND WEB UI PASS: real file modification time, left and right-click actions, optional web and browser tools, sources and persistence.');
 }finally{
   await app?.close();
   server.close();

@@ -18,6 +18,13 @@ function publicUrl(value){
   return url;
 }
 
+async function assertPublicAddress(value){
+  const url=publicUrl(value);
+  const {address}=await lookup(url.hostname,{family:4});
+  if(reserved.check(address,'ipv4'))throw new Error('This address is outside the public web.');
+  return url.href;
+}
+
 async function readPublicPage(value,signal){
   let url=publicUrl(value);
   for(let redirects=0;redirects<=4;redirects++){
@@ -140,4 +147,4 @@ function createWebTools(BrowserWindow){
     throw new Error('Unknown web tool.');
   };
 }
-module.exports={createWebTools};
+module.exports={createWebTools,assertPublicAddress};

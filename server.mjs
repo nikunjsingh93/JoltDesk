@@ -84,7 +84,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   const audit=(event)=>{auditQueue=auditQueue.then(async()=>{const file=path.join(dataDir,'diagnostics.jsonl');try{if((await fs.stat(file)).size>2000000)await fs.rename(file,path.join(dataDir,'diagnostics.previous.jsonl'));}catch{}await fs.appendFile(file,JSON.stringify({at:new Date().toISOString(),...event})+'\n');}).catch(()=>{});};
   const broadcast=(id,event)=>{const rpc=runners.get(id);if(rpc){event.seq=++rpc.eventSeq;if(rpc.viewState)reduceBackground(rpc.viewState,event);}for(const ws of subscribers.get(id)||[]) if(ws.readyState===1)ws.send(JSON.stringify(event));};
   const endpointStatuses=new Map(),endpointChecks=new Map();
-  const config=()=>({connected,connection,connections:meta.connections.map(c=>({...c,status:endpointStatuses.get(c.id)||{state:'saved'},hasSavedKey:!!secrets[credentialId(c)],hasSessionKey:!!sessionKeys[credentialId(c)]})),runningChats:[...runners].filter(([,r])=>r.busy).map(([id])=>id),connectionError,connectionNote,preferredModel:meta.preferredModels?.[credentialId(connection)]||null,hasSavedKey:!!secrets[credentialId(connection)],secureStorage:!!vault,models,projects:meta.projects,chats:meta.chats,binary:selectedBinary(),native:!!native,webAvailable:!!native?.webTools,engine:engine?.status()||null,customEngine:!!meta.binary});
+  const config=()=>({connected,connection,connections:meta.connections.map(c=>({...c,status:endpointStatuses.get(c.id)||{state:'saved'},hasSavedKey:!!secrets[credentialId(c)],hasSessionKey:!!sessionKeys[credentialId(c)]})),runningChats:[...runners].filter(([,r])=>r.busy).map(([id])=>id),connectionError,connectionNote,preferredModel:meta.preferredModels?.[credentialId(connection)]||null,hasSavedKey:!!secrets[credentialId(connection)],secureStorage:!!vault,models,projects:meta.projects,chats:meta.chats,binary:selectedBinary(),native:!!native,webAvailable:!!native?.webTools,browserAvailable:!!native?.browser,engine:engine?.status()||null,customEngine:!!meta.binary});
   function rememberProfile(){if(!connection.id)return;const i=meta.connections.findIndex(c=>c.id===connection.id);const p={...connection,models};if(i<0)meta.connections.push(p);else meta.connections[i]=p;meta.connection=connection;if(connected)endpointStatuses.set(connection.id,{state:'connected',checkedAt:Date.now()});}
   async function checkEndpoint(profile){
     if(endpointChecks.has(profile.id))return endpointChecks.get(profile.id);
@@ -164,7 +164,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
         registry.providers={...registry.providers,[LOCAL_PROVIDER]:definition};
       }
       await fs.writeFile(path.join(isolatedAgentDir,'models.json'),JSON.stringify(registry));await fs.copyFile(path.join(agentDir,'settings.json'),path.join(isolatedAgentDir,'settings.json'));
-      const webAccess=native?.webTools?{url:`http://127.0.0.1:${http.address().port}/internal/chats/${chat.id}/web`,key:randomBytes(32).toString('hex')}:undefined;
+      const webAccess=native?.webTools?{url:`http://127.0.0.1:${http.address().port}/internal/chats/${chat.id}/web`,key:randomBytes(32).toString('hex'),browser:!!native.browser}:undefined;
       const rpc=new Rpc({binary:selectedBinary(),cwd,agentDir:isolatedAgentDir,sessionDir,sessionId:chat.id,key:candidate,mode:chat.mode,extension,serverTimings:profile.provider==='local'&&profile.profile!=='generic',autoOutput:profile.provider==='local'&&profile.maxTokens==='auto',webAccess});
       rpc.webKey=webAccess?.key;
       rpc.webPending=0;
@@ -226,7 +226,10 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     rpc.webPending++;
     try{
       const signal=AbortSignal.any([cancel.signal,AbortSignal.timeout(15000)]);
-      const result=await native.webTools(req.body.kind,req.body.input||{},signal);
+      const kind=String(req.body.kind||'');
+      const result=kind.startsWith('browser-')
+        ?await (native.browser?native.browser.agent(kind,req.body.input||{},signal):Promise.reject(new Error('The JoltDesk browser is available in the desktop app.')))
+        :await native.webTools(kind,req.body.input||{},signal);
       if(!res.destroyed)res.json(result);
     }finally{rpc.webPending--;}
   });

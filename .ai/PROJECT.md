@@ -13,6 +13,7 @@ JoltDesk is an independent desktop workspace for local and remote AI model APIs.
 | `connections.mjs` | API normalization, model discovery, context estimates, and model-specific reasoning controls |
 | `approval.ts` | App-owned Pi-Bolt extension for permissions, web tool registration, and provider timing |
 | `web-tools.cjs` | Public web search and read-only HTML/text extraction |
+| `browser-pane.cjs`, `desktop-preload.cjs`, `public/browser-panel.mjs` | Built-in browser: `WebContentsView` tabs owned by the main process, a preload bridge limited to the app origin, and the Browser tab of the right side panel |
 | `public/` | HTML, CSS and vanilla JavaScript renderer, including chat state and reply metrics |
 | `engine-updater.mjs` and `bundle-engine.mjs` | Verified engine downloads, activation and packaging |
 | `test/` | Backend and Electron UI checks with simulated model APIs, plus an opt-in live discovery check |
@@ -43,6 +44,9 @@ npm run portable -- --arm64
 - Keep streamed scroll containers mounted. Replacing the thinking or code node on each update reset spinner animation, focus, and scroll position. Follow new output only when the reader is already at the bottom.
 - Prefer native generation timings where available. Buffered stream chunks can make receipt-based throughput estimates misleading.
 - File permissions control the agent’s available tools and approval flow. Approved shell tools run with the current OS user’s permissions. Web access is separately opt-in and reads public pages without running their scripts.
+- The built-in browser's pages are native `WebContentsView`s drawn over `#browser-viewport` and above all HTML. The renderer hides them while any `<dialog>` is open, while the side panel shows Files, and when a page fails to load so the error text is visible. Window captures from `BrowserWindow.capturePage()` do not include these views. Capture the view's own `webContents` instead.
+- Browser tabs use the `persist:joltdesk-browser` partition, a sandbox, no preload, HTTP(S)-only navigation, and deny-by-default permissions. Agent `browser_open` accepts only public addresses through the same check as `browse_page`. `browser_read` reads the active tab in an isolated world and requires the chat's Web toggle. The user can browse anywhere, including localhost.
+- Files and Browser share the right side panel and remember separate widths.
 - Keep the app’s MIT license separate from Pi-Bolt and other bundled notices. Preserve the signed engine bundle’s notices and provenance in distributions.
 
 ## Release convention

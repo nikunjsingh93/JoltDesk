@@ -23,6 +23,7 @@ export class Rpc extends EventEmitter {
       if(process.platform==='win32')tools.push('powershell');
       tools.push('grep','find','ls');
       if(webAccess)tools.push('web_search','browse_page');
+      if(webAccess?.browser)tools.push('browser_open','browser_read');
       args.push('--tools',tools.join(','));
     }
     else if(mode === 'chat') args.push('--no-tools');
@@ -30,7 +31,7 @@ export class Rpc extends EventEmitter {
     else args.push('--tools',process.platform === 'win32' ? 'read,write,edit,bash,powershell,grep,find,ls' : 'read,write,edit,bash,grep,find,ls');
     if(extension) args.push('-e', extension);
     this.child = spawn(binary,args,{cwd,windowsHide:true,env:{...process.env,PI_CODING_AGENT_DIR:agentDir,
-      OPENAI_API_KEY:key || 'discovery-only-no-api-key', BOLT_LOCAL_API_KEY:key||'local-no-key', BOLT_PERMISSION_MODE:mode, BOLT_LLAMA_TIMINGS:serverTimings?'1':'0', BOLT_AUTO_OUTPUT:autoOutput?'1':'0', BOLT_WEB_URL:webAccess?.url||'', BOLT_WEB_KEY:webAccess?.key||'', PI_OFFLINE:'1', PI_TELEMETRY:'0'}});
+      OPENAI_API_KEY:key || 'discovery-only-no-api-key', BOLT_LOCAL_API_KEY:key||'local-no-key', BOLT_PERMISSION_MODE:mode, BOLT_LLAMA_TIMINGS:serverTimings?'1':'0', BOLT_AUTO_OUTPUT:autoOutput?'1':'0', BOLT_WEB_URL:webAccess?.url||'', BOLT_WEB_KEY:webAccess?.key||'', BOLT_BROWSER:webAccess?.browser?'1':'0', PI_OFFLINE:'1', PI_TELEMETRY:'0'}});
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', chunk => {
       this.buffer += chunk;

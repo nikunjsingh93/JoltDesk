@@ -6,20 +6,24 @@ export default function(pi: any) {
   const fullTools=['read','write','edit','bash','powershell','grep','find','ls'];
   const webUrl=process.env.BOLT_WEB_URL;
   const webKey=process.env.BOLT_WEB_KEY;
-  const webTools=['web_search','browse_page'];
+  const webTools=['web_search','browse_page','browser_open','browser_read'];
   let webEnabled=false;
   if(webUrl&&webKey){
     for(const tool of [
       {name:'web_search',label:'Search the web',kind:'search',field:'query',description:'Find public web pages. Use the returned source URLs to cite the answer.'},
-      {name:'browse_page',label:'Read a web page',kind:'browse',field:'url',description:'Open a public URL and read its text and links. Follow a link by calling this tool with its URL.'}
+      {name:'browse_page',label:'Read a web page',kind:'browse',field:'url',description:'Open a public URL and read its text and links. Follow a link by calling this tool with its URL.'},
+      ...(process.env.BOLT_BROWSER==='1'?[
+        {name:'browser_open',label:'Open in JoltDesk browser',kind:'browser-open',field:'url',description:'Open a public URL in a new tab of the user\'s visible JoltDesk browser, let the page run its scripts, and read the rendered text and links. Use this for pages that need JavaScript or when the user wants to see the page.'},
+        {name:'browser_read',label:'Read the open browser page',kind:'browser-read',field:'',description:'Read the text and links of the page the user currently has open in the JoltDesk browser. Use this when the user refers to the page they are viewing.'}
+      ]:[])
     ]){
       pi.registerTool({
         name:tool.name,label:tool.label,description:tool.description,defaultActive:false,
-        parameters:{type:'object',properties:{[tool.field]:{type:'string'}},required:[tool.field],additionalProperties:false},
+        parameters:tool.field?{type:'object',properties:{[tool.field]:{type:'string'}},required:[tool.field],additionalProperties:false}:{type:'object',properties:{},additionalProperties:false},
         async execute(_id:string,input:any,signal?:AbortSignal){
           const response=await fetch(webUrl,{
             method:'POST',headers:{'Content-Type':'application/json','X-Bolt-Web-Key':webKey},
-            body:JSON.stringify({kind:tool.kind,input}),signal
+            body:JSON.stringify({kind:tool.kind,input:tool.field?input:{}}),signal
           });
           const result=await response.json();
           if(!response.ok)throw new Error(result.error||'Web request failed.');

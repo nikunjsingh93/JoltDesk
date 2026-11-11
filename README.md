@@ -4,7 +4,7 @@ A standalone desktop GUI with **Pi-Bolt built in**, connected through its stream
 
 ## Run on Windows ARM64
 
-1. Open **JoltDesk-0.10.10-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
+1. Open **JoltDesk-0.11.0-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
 2. Open **Settings & connection**, select OpenAI or Local / OpenAI-compatible API, enter connection details, and click **Connect & discover models**.
 3. Pick a model and start chatting. No manual `models.json` changes, terminal commands, or Node installation are needed for the portable build.
 
@@ -23,6 +23,12 @@ Screenshots use a demo workspace and simulated model connections.
 ### API connections
 
 ![JoltDesk settings showing both a local Qwen API and an OpenAI API marked connected](docs/screenshots/connections.png)
+
+## Built-in browser in 0.11
+
+The right side panel now has **Files** and **Browser** tabs. Open it with the panel button in the header and choose **Browser** to browse in tabs with back, forward, reload and an address bar that also accepts searches. Links in replies and in Sources open there. Ctrl or Shift click opens your default browser instead. **＋ Chat** attaches the open page's text to your next message, and ↗ opens it in your default browser.
+
+The browser keeps its own cookies and sign-ins in a separate JoltDesk profile. Pages run sandboxed without access to JoltDesk. Camera, microphone, location and notification requests are declined. When **Web** is on in a chat, the model can also use `browser_open` to open a public page in a new browser tab and read it after its scripts run, and `browser_read` to read the page you have open. Agent tabs are marked with ϟ. Only turn on Web when you are comfortable with the model reading the page you are viewing.
 
 ## Code scrolling, file actions and web access in 0.10.6
 

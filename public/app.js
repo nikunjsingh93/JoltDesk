@@ -1,5 +1,6 @@
 import {displayMetrics,elapsedText} from './reply-metrics.mjs';
 import {partialStringField} from './stream-content.mjs';
+import {initBrowserPanel,panelMode} from './browser-panel.mjs';
 import {makeRuntime,reduceBackground,trackTool,collectInspector,updateThinking} from './chat-runtime.mjs';
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let config, current, projectId=null, ws, files=[], messages=[], streaming=null, running=false, started=0, chars=0, usage={}, stats={}, approval, generation=0, finalSeconds=0,followChat=true;
@@ -578,7 +579,7 @@ $('#file-menu').addEventListener('keydown',event=>{
   const items=[...menu.querySelectorAll('button')];
   items[(items.indexOf(document.activeElement)+(event.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();
 });
-const inspectorToggle=document.createElement('button');inspectorToggle.id='toggle-inspector';inspectorToggle.className='icon';inspectorToggle.title='Files & sources';inspectorToggle.setAttribute('aria-label','Toggle files and sources');inspectorToggle.textContent='▥';$('.header-actions').append(inspectorToggle);
+const inspectorToggle=document.createElement('button');inspectorToggle.id='toggle-inspector';inspectorToggle.className='icon';inspectorToggle.title='Files & browser';inspectorToggle.setAttribute('aria-label','Toggle files and browser panel');inspectorToggle.textContent='▥';$('.header-actions').append(inspectorToggle);
 const setInspector=open=>{
   document.body.classList.toggle('inspector-open',open);
   inspectorToggle.setAttribute('aria-expanded',String(open));
@@ -594,14 +595,25 @@ setSidebarWidth(Number(localStorage.getItem('bolt-sidebar-width'))||265);
 resizer.onpointerdown=e=>{resizing=true;resizer.setPointerCapture(e.pointerId);document.body.classList.add('sidebar-resizing');e.preventDefault();};resizer.onpointermove=e=>{if(resizing)setSidebarWidth(e.clientX);};const finishResize=()=>{resizing=false;document.body.classList.remove('sidebar-resizing');try{localStorage.setItem('bolt-sidebar-width',String(resizer.getAttribute('aria-valuenow')));}catch{}};resizer.onpointerup=finishResize;resizer.onpointercancel=finishResize;
 resizer.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();setSidebarWidth(e.key==='Home'?200:e.key==='End'?480:Number(resizer.getAttribute('aria-valuenow'))+(e.key==='ArrowLeft'?-16:16));finishResize();};window.addEventListener('resize',()=>{if(innerWidth<1100)setInspector(false);});
 const inspectorResizer=document.createElement('div');inspectorResizer.id='inspector-resizer';inspectorResizer.setAttribute('role','separator');inspectorResizer.setAttribute('aria-orientation','vertical');inspectorResizer.setAttribute('aria-label','Resize files and sources');inspectorResizer.tabIndex=0;$('#work-panel').prepend(inspectorResizer);
-let inspectorResize=null,preferredInspectorWidth=Number(localStorage.getItem('bolt-inspector-width'))||250;
-function setInspectorWidth(width){const sidebar=innerWidth>=1100?$('#sidebar').getBoundingClientRect().width:0,max=Math.max(220,Math.min(600,innerWidth-(innerWidth>=1100?sidebar+420:32)));const value=Math.max(220,Math.min(max,width));document.documentElement.style.setProperty('--inspector-width',value+'px');inspectorResizer.setAttribute('aria-valuenow',Math.round(value));inspectorResizer.setAttribute('aria-valuemin','220');inspectorResizer.setAttribute('aria-valuemax',Math.floor(max));return value;}
-setInspectorWidth(preferredInspectorWidth);
+// Files and Browser share the side panel and remember separate widths.
+const panelSizes={files:{key:'bolt-inspector-width',css:'--inspector-width',min:220,cap:600,main:420},browser:{key:'joltdesk-browser-width',css:'--browser-width',min:320,cap:1600,main:380}};
+const panelWidths={files:Number(localStorage.getItem('bolt-inspector-width'))||250,browser:Number(localStorage.getItem('joltdesk-browser-width'))||Math.round(innerWidth*.42)};
+let inspectorResize=null;
+function setInspectorWidth(width){const size=panelSizes[panelMode()],sidebar=innerWidth>=1100?$('#sidebar').getBoundingClientRect().width:0,max=Math.max(size.min,Math.min(size.cap,innerWidth-(innerWidth>=1100?sidebar+size.main:32)));const value=Math.round(Math.max(size.min,Math.min(max,width)));document.documentElement.style.setProperty(size.css,value+'px');inspectorResizer.setAttribute('aria-valuenow',value);inspectorResizer.setAttribute('aria-valuemin',String(size.min));inspectorResizer.setAttribute('aria-valuemax',Math.floor(max));return value;}
+const applyPanelWidth=()=>{panelWidths[panelMode()]=setInspectorWidth(panelWidths[panelMode()]);};
+applyPanelWidth();window.addEventListener('panelmodechange',applyPanelWidth);
 inspectorResizer.onpointerdown=e=>{if(e.button!==0)return;inspectorResize={x:e.clientX,width:$('#work-panel').getBoundingClientRect().width};inspectorResizer.setPointerCapture(e.pointerId);document.body.classList.add('sidebar-resizing');e.preventDefault();};
-inspectorResizer.onpointermove=e=>{if(inspectorResize)preferredInspectorWidth=setInspectorWidth(inspectorResize.width+inspectorResize.x-e.clientX);};
-const finishInspectorResize=()=>{inspectorResize=null;document.body.classList.remove('sidebar-resizing');try{localStorage.setItem('bolt-inspector-width',String(preferredInspectorWidth));}catch{}};
+inspectorResizer.onpointermove=e=>{if(inspectorResize)panelWidths[panelMode()]=setInspectorWidth(inspectorResize.width+inspectorResize.x-e.clientX);};
+const finishInspectorResize=()=>{inspectorResize=null;document.body.classList.remove('sidebar-resizing');try{localStorage.setItem(panelSizes[panelMode()].key,String(panelWidths[panelMode()]));}catch{}};
 inspectorResizer.onpointerup=finishInspectorResize;inspectorResizer.onpointercancel=finishInspectorResize;inspectorResizer.onlostpointercapture=finishInspectorResize;
-inspectorResizer.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();preferredInspectorWidth=setInspectorWidth(e.key==='Home'?220:e.key==='End'?600:Number(inspectorResizer.getAttribute('aria-valuenow'))+(e.key==='ArrowLeft'?16:-16));finishInspectorResize();};
-window.addEventListener('resize',()=>setInspectorWidth(preferredInspectorWidth));new ResizeObserver(()=>setInspectorWidth(preferredInspectorWidth)).observe($('#sidebar'));
+inspectorResizer.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();panelWidths[panelMode()]=setInspectorWidth(e.key==='Home'?0:e.key==='End'?Infinity:Number(inspectorResizer.getAttribute('aria-valuenow'))+(e.key==='ArrowLeft'?16:-16));finishInspectorResize();};
+window.addEventListener('resize',()=>setInspectorWidth(panelWidths[panelMode()]));new ResizeObserver(()=>setInspectorWidth(panelWidths[panelMode()])).observe($('#sidebar'));
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='n'){e.preventDefault();newChat(null);}if((e.ctrlKey||e.metaKey)&&e.key===','){e.preventDefault();$('#settings-dialog').showModal();}});
+const browser=initBrowserPanel({toast,showPanel:()=>setInspector(true),onAttach:file=>{files.push(file);renderFiles();$('#prompt').focus();}});
+// Links in replies and sources open in the built-in browser. Ctrl or Shift click uses the default browser.
+document.addEventListener('click',e=>{
+  const link=e.target.closest('#messages a[href], #inspector-sources a[href]');
+  if(!link||!browser.available||e.ctrlKey||e.shiftKey||e.metaKey||!/^https?:/i.test(link.href))return;
+  e.preventDefault();browser.open(link.href);
+});
 try{config=await api('/config');renderSidebar();renderChat();updateMetrics();}catch(e){toast(e.message);}
