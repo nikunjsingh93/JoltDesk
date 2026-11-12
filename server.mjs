@@ -12,6 +12,7 @@ import { completedMetrics } from './public/reply-metrics.mjs';
 import {makeRuntime,reduceBackground,collectInspector} from './public/chat-runtime.mjs';
 import { createCheckpoints } from './checkpoints.mjs';
 import * as gitOps from './git.mjs';
+import { createTerminals } from './terminal.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),vault,native,engineDir,requireBundled=false,autoStartUpdates=true,updateFetcher}={}) {
@@ -82,6 +83,8 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   const metricsDir=path.join(dataDir,'reply-metrics');await fs.mkdir(metricsDir,{recursive:true});
   const checkpoints=createCheckpoints(path.join(dataDir,'checkpoints'));
   const restoreNotes=new Map();
+  const terminals=createTerminals({emit:(chatId,event)=>broadcast(chatId,event)});
+  const outputText=result=>Array.isArray(result?.content)?result.content.filter(c=>c.type==='text').map(c=>c.text).join(''):undefined;
   const chatCwd=chat=>meta.projects.find(project=>project.id===chat.projectId)?.path||path.join(dataDir,'workspace');
   // Closes the running turn's checkpoint and tells open windows to refresh Changes.
   const finishTurn=(chatId,rpc)=>{
@@ -94,7 +97,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   const audit=(event)=>{auditQueue=auditQueue.then(async()=>{const file=path.join(dataDir,'diagnostics.jsonl');try{if((await fs.stat(file)).size>2000000)await fs.rename(file,path.join(dataDir,'diagnostics.previous.jsonl'));}catch{}await fs.appendFile(file,JSON.stringify({at:new Date().toISOString(),...event})+'\n');}).catch(()=>{});};
   const broadcast=(id,event)=>{const rpc=runners.get(id);if(rpc){event.seq=++rpc.eventSeq;if(rpc.viewState)reduceBackground(rpc.viewState,event);}for(const ws of subscribers.get(id)||[]) if(ws.readyState===1)ws.send(JSON.stringify(event));};
   const endpointStatuses=new Map(),endpointChecks=new Map();
-  const config=()=>({connected,connection,connections:meta.connections.map(c=>({...c,status:endpointStatuses.get(c.id)||{state:'saved'},hasSavedKey:!!secrets[credentialId(c)],hasSessionKey:!!sessionKeys[credentialId(c)]})),runningChats:[...runners].filter(([,r])=>r.busy).map(([id])=>id),connectionError,connectionNote,preferredModel:meta.preferredModels?.[credentialId(connection)]||null,hasSavedKey:!!secrets[credentialId(connection)],secureStorage:!!vault,models,projects:meta.projects,chats:meta.chats,binary:selectedBinary(),native:!!native,webAvailable:!!native?.webTools,browserAvailable:!!native?.browser,engine:engine?.status()||null,customEngine:!!meta.binary});
+  const config=()=>({instructions:meta.instructions||'',connected,connection,connections:meta.connections.map(c=>({...c,status:endpointStatuses.get(c.id)||{state:'saved'},hasSavedKey:!!secrets[credentialId(c)],hasSessionKey:!!sessionKeys[credentialId(c)]})),runningChats:[...runners].filter(([,r])=>r.busy).map(([id])=>id),connectionError,connectionNote,preferredModel:meta.preferredModels?.[credentialId(connection)]||null,hasSavedKey:!!secrets[credentialId(connection)],secureStorage:!!vault,models,projects:meta.projects,chats:meta.chats,binary:selectedBinary(),native:!!native,webAvailable:!!native?.webTools,browserAvailable:!!native?.browser,engine:engine?.status()||null,customEngine:!!meta.binary});
   function rememberProfile(){if(!connection.id)return;const i=meta.connections.findIndex(c=>c.id===connection.id);const p={...connection,models};if(i<0)meta.connections.push(p);else meta.connections[i]=p;meta.connection=connection;if(connected)endpointStatuses.set(connection.id,{state:'connected',checkedAt:Date.now()});}
   async function checkEndpoint(profile){
     if(endpointChecks.has(profile.id))return endpointChecks.get(profile.id);
@@ -153,7 +156,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     const profile=chat.connectionId?meta.connections.find(c=>c.id===chat.connectionId):{...connection,models};
     if(!profile)throw new Error('This chat’s API was removed. Select another API to continue.');
     const existing=runners.get(chat.id);
-    if(existing&&(existing.busy||(existing.boundConnection.id===profile.id&&existing.profileRevision===(profile.revision||0))))return existing;
+    if(existing&&(existing.busy||(existing.boundConnection.id===profile.id&&existing.profileRevision===(profile.revision||0)&&existing.instructionsRevision===(meta.instructionsRevision||0))))return existing;
     if(existing){existing.close();runners.delete(chat.id);}
     if(starting.has(chat.id))return starting.get(chat.id);
     const promise=(async()=>{
@@ -173,12 +176,12 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
         else {const discovered=await discoverLocal(profile,candidate);definition=discovered.definition;profileModels=definition.models.map(m=>({...m,provider:LOCAL_PROVIDER}));}
         registry.providers={...registry.providers,[LOCAL_PROVIDER]:definition};
       }
-      await fs.writeFile(path.join(isolatedAgentDir,'models.json'),JSON.stringify(registry));await fs.copyFile(path.join(agentDir,'settings.json'),path.join(isolatedAgentDir,'settings.json'));
+      await fs.writeFile(path.join(isolatedAgentDir,'models.json'),JSON.stringify(registry));const personal=path.join(isolatedAgentDir,'AGENTS.md');if(String(meta.instructions||'').trim())await fs.writeFile(personal,meta.instructions);else await fs.rm(personal,{force:true});await fs.copyFile(path.join(agentDir,'settings.json'),path.join(isolatedAgentDir,'settings.json'));
       const webAccess=native?.webTools?{url:`http://127.0.0.1:${http.address().port}/internal/chats/${chat.id}/web`,key:randomBytes(32).toString('hex'),browser:!!native.browser}:undefined;
       const rpc=new Rpc({binary:selectedBinary(),cwd,agentDir:isolatedAgentDir,sessionDir,sessionId:chat.id,key:candidate,mode:chat.mode,extension,serverTimings:profile.provider==='local'&&profile.profile!=='generic',autoOutput:profile.provider==='local'&&profile.maxTokens==='auto',webAccess});
       rpc.webKey=webAccess?.key;
       rpc.webPending=0;
-      rpc.boundConnection={...profile};rpc.models=profileModels;rpc.profileRevision=profile.revision||0;rpc.keySnapshot=candidate;
+      rpc.boundConnection={...profile};rpc.instructionsRevision=meta.instructionsRevision||0;rpc.models=profileModels;rpc.profileRevision=profile.revision||0;rpc.keySnapshot=candidate;
       rpc.viewState=makeRuntime(chat);rpc.eventSeq=0;
       rpc.busy=false;
       rpc.on('event',e=>{
@@ -208,7 +211,12 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
           audit({type:'reply_end',chatId:chat.id,stopReason:e.message.stopReason,...e.replyMetrics,firstDeltaMs:rpc.firstDelta,deltaCount:rpc.deltaCount});
         }
         if(e.type==='agent_start')rpc.busy=true;
-        if(e.type==='agent_settled'){rpc.busy=false;finishTurn(chat.id,rpc);rpc.command('get_session_stats').then(s=>broadcast(chat.id,{type:'stats',data:s})).catch(()=>{});}
+        if(['bash','powershell'].includes(e.toolName)){
+          if(e.type==='tool_execution_start')terminals.agentStart(chat.id,chatCwd(chat),{id:e.toolCallId,tool:e.toolName,command:e.args?.command});
+          if(e.type==='tool_execution_update')terminals.agentOutput(chat.id,e.toolCallId,outputText(e.partialResult));
+          if(e.type==='tool_execution_end')terminals.agentEnd(chat.id,e.toolCallId,{text:outputText(e.result),exitCode:e.result?.structuredContent?.exit_code,isError:!!e.isError});
+        }
+        if(e.type==='agent_settled'){rpc.busy=false;finishTurn(chat.id,rpc);terminals.agentSettled(chat.id);rpc.command('get_session_stats').then(s=>broadcast(chat.id,{type:'stats',data:s})).catch(()=>{});}
         if(e.type==='message_end'&&e.message?.role==='assistant'&&e.message.errorMessage&&e.message.stopReason!=='aborted')broadcast(chat.id,{type:'app_error',message:e.message.errorMessage});
         broadcast(chat.id,e);
       });
@@ -347,6 +355,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     for(const file of await fs.readdir(sessionDir))if(file.endsWith('_'+chat.id+'.jsonl'))await fs.rename(path.join(sessionDir,file),path.join(trash,file));
     await metricWrites.get(chat.id)?.catch(()=>{});
     await fs.rename(path.join(metricsDir,chat.id+'.json'),path.join(trash,'reply-metrics.json')).catch(e=>{if(e.code!=='ENOENT')throw e;});
+    terminals.close(chat.id);
     await checkpoints.remove(chat.id,trash);
     metricCache.delete(chat.id);res.json({deleted:true});
   });
@@ -429,6 +438,61 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
       for(const file of await fs.readdir(sessions).catch(()=>[]))if(file.includes(sessionId))await fs.rm(path.join(sessions,file),{force:true}).catch(()=>{});
     }
   }
+  // Instruction files. Pi-Bolt reads AGENTS.md (or CLAUDE.md when a folder has no
+  // AGENTS.md) from the agent folder and from every folder down to the chat's
+  // folder. Personal instructions live in each chat's agent folder.
+  const INSTRUCTIONS_TEMPLATE='# Project instructions\n\nJoltDesk\'s agent, and other coding agents, read this file in every chat for this folder.\n\n## About this project\n\n## Commands\n\n## Conventions\n';
+  async function instructionFiles(chat){
+    const cwd=chatCwd(chat),files=[];
+    if(String(meta.instructions||'').trim())files.push({kind:'personal',name:'Personal instructions',path:null});
+    const folders=[];
+    for(let dir=path.resolve(cwd);;dir=path.dirname(dir)){folders.unshift(dir);if(path.dirname(dir)===dir)break;}
+    for(const dir of folders){
+      for(const name of ['AGENTS.md','CLAUDE.md']){
+        const file=path.join(dir,name);
+        const stat=await fs.stat(file).catch(()=>null);
+        if(stat?.isFile()){files.push({kind:dir===path.resolve(cwd)?'project':'parent',name,path:file,folder:dir});break;}
+      }
+    }
+    const own=files.some(f=>f.kind==='project');
+    return {cwd,files,canCreate:!own&&!!(await fs.stat(cwd).catch(()=>null))?.isDirectory()};
+  }
+  app.post('/api/instructions',async(req,res)=>{
+    const text=String(req.body.text||'');
+    if(text.length>20000)throw new Error('Keep personal instructions under 20,000 characters.');
+    meta.instructions=text;meta.instructionsRevision=(meta.instructionsRevision||0)+1;await save();
+    // Each chat restarts its engine before its next message so the engine reads the new file.
+    res.json(config());
+  });
+  app.get('/api/chats/:id/instructions',async(req,res)=>{
+    const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)throw new Error('Chat not found');
+    res.json(await instructionFiles(chat));
+  });
+  app.post('/api/chats/:id/instructions/open',async(req,res)=>{
+    const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)throw new Error('Chat not found');
+    if(!native?.fileAction)throw new Error('Opening files is available in the desktop app.');
+    const {files}=await instructionFiles(chat);
+    const file=files.find(f=>f.path&&f.path===req.body.path);
+    if(!file)throw new Error('This instruction file is not available.');
+    await native.fileAction(req.body.action==='reveal'?'reveal':'open',file.path);
+    res.json({ok:true});
+  });
+  app.post('/api/chats/:id/instructions/create',async(req,res)=>{
+    const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)throw new Error('Chat not found');
+    const info=await instructionFiles(chat);
+    if(!info.canCreate)throw new Error('This folder already has an instruction file.');
+    const file=path.join(info.cwd,'AGENTS.md');
+    await fs.writeFile(file,INSTRUCTIONS_TEMPLATE,{flag:'wx'});
+    if(native?.fileAction)await native.fileAction('open',file).catch(()=>{});
+    res.json(await instructionFiles(chat));
+  });
+  // Terminal tab.
+  const terminalChat=req=>{const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)throw new Error('Chat not found');return chat;};
+  app.get('/api/chats/:id/terminal',async(req,res)=>{const chat=terminalChat(req);res.json(terminals.state(chat.id,chatCwd(chat)));});
+  app.post('/api/chats/:id/terminal/run',async(req,res)=>{const chat=terminalChat(req);res.json(await terminals.run(chat.id,chatCwd(chat),req.body.command));});
+  app.post('/api/chats/:id/terminal/clear',async(req,res)=>{terminals.clear(terminalChat(req).id);res.json({ok:true});});
+  app.post('/api/chats/:id/terminal/:entry/input',async(req,res)=>{terminals.input(terminalChat(req).id,req.params.entry,req.body.text??'');res.json({ok:true});});
+  app.post('/api/chats/:id/terminal/:entry/stop',async(req,res)=>{terminals.stop(terminalChat(req).id,req.params.entry);res.json({ok:true});});
   async function inspectorFiles(chat){
     const rpc=runners.get(chat.id);
     if(!rpc)return [];
@@ -532,7 +596,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   const address=`http://127.0.0.1:${http.address().port}`;
   if(connection.autoConnect!==false&&(key||connection.provider==='local')){try{const result=await connectionModels(connection,key);models=result.models;connectionNote=result.note;connected=models.length>0;rememberProfile();await save();}catch(e){connectionError=e.message;}}
   if(autoStartUpdates)engine?.start();
-  return {url:address,token,close:()=>{engine?.close();for(const rpc of runners.values())rpc.close();for(const ws of wss.clients)ws.close();http.close();}};
+  return {url:address,token,close:()=>{engine?.close();terminals.closeAll();for(const rpc of runners.values())rpc.close();for(const ws of wss.clients)ws.close();http.close();}};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const server=await startServer({port:Number(process.env.PORT)||4317,dataDir:process.env.BOLT_DATA_DIR});console.log(`JoltDesk is ready: ${server.url}`);

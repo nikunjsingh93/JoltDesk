@@ -24,6 +24,12 @@ Screenshots use a demo workspace and simulated model connections.
 
 ![JoltDesk settings showing both a local Qwen API and an OpenAI API marked connected](docs/screenshots/connections.png)
 
+## Terminal tab and instructions (unreleased)
+
+The side panel's **Terminal** tab runs commands in the chat's folder: PowerShell on Windows (PowerShell 7 when it is installed), or your shell elsewhere. Output streams live. **Stop**, or Ctrl+C in an empty command box, ends the command and everything it started. A running command has its own input box for answering prompts. `cd` changes the terminal's folder, ↑ and ↓ recall earlier commands, and **Clear** or Ctrl+L removes finished commands. Commands the agent runs with `bash` or `powershell` appear in the same list, marked ϟ, with live output. **Stop** on one of them stops the agent's reply. The terminal has no pseudo-terminal, so full-screen programs such as editors do not work there.
+
+The agent follows instruction files. It reads `AGENTS.md`, or `CLAUDE.md` when a folder has no `AGENTS.md`, from the chat's folder and every folder above it. The Files tab lists the files a chat uses. Click one to open it, or use **＋ Create AGENTS.md** to start one in the chat's folder. **Settings → Personal instructions** apply to every chat. Changes take effect from each chat's next message.
+
 ## Git tab (unreleased)
 
 The side panel's **Git** tab shows the Git repository for a project chat's folder: the branch, whether it is ahead of or behind its upstream, the changed files, and the most recent commits. Click a file to see its diff against the last commit. Tick the files to include, then write a message or click **✨ Write message** to have the chat's model write one from the selected changes. That request runs separately and does not appear in the conversation. **Commit** commits only the ticked files. **Push** sends commits to the upstream branch, and **Publish** pushes a new branch and sets its upstream. JoltDesk uses the `git` command on your PATH with your existing Git identity and credentials. Commits wait until the chat's reply finishes.

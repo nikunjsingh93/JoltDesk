@@ -4,10 +4,12 @@ Updated November 11, 2026 by Claude Code.
 
 ## Current state
 
-The main branch has two unreleased features on top of 0.11.0: a Changes tab for reviewing and undoing agent edits, and a Git tab. Both are committed locally but not pushed. JoltDesk 0.11.0 adds a built-in browser as the Browser tab of the right side panel. It is published as the [0.11.0 portable release](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.11.0) for Windows ARM64 and bundles Pi-Bolt bolt-v1.2.1. The app uses the existing bolt mark and reuses existing Bolt Desktop profiles in place.
+The main branch has unreleased features on top of 0.11.0, committed locally but not pushed: the Changes tab (review and undo agent edits), the Git tab, the Terminal tab, and instruction-file support (a list in the Files tab, and personal instructions in Settings). JoltDesk 0.11.0 adds a built-in browser as the Browser tab of the right side panel. It is published as the [0.11.0 portable release](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.11.0) for Windows ARM64 and bundles Pi-Bolt bolt-v1.2.1. The app uses the existing bolt mark and reuses existing Bolt Desktop profiles in place.
 
 ## Recently completed
 
+- Verified that Pi-Bolt already loads project AGENTS.md/CLAUDE.md, including from parent folders. Added an Instructions list to the Files tab with Open and ＋ Create AGENTS.md, and Settings → Personal instructions, written to each chat's agent folder.
+- Added a **Terminal** tab. Your commands run in the chat's folder with live output, Stop, stdin, `cd`, history, and Clear. The agent's bash and PowerShell commands are mirrored live, and Stop on one aborts the reply. A badge counts running commands. Panel tabs wrap to two rows at narrow widths.
 - Added a **Git** tab (Files | Changes | Git | Browser) for a project chat's repository. It shows the branch, ahead/behind, changed files with checkboxes and diffs against HEAD, and recent commits. **✨ Write message** asks the chat's model through a separate one-shot engine process. Commit includes only the ticked files and waits for the agent to finish. Push or Publish sets the upstream when it is missing. Untracked files show U and conflicts show !. `diff.mjs` now also exports `diffView`, which the Changes and Git tabs share.
 - Added a **Changes** tab to the side panel (Files | Changes | Browser). Each request that used `write` or `edit` is listed with its files, +/− counts, and an expandable line diff. **Undo** restores the request's files, and later requests' edits to them. **Revert** restores one file. Both confirm first and confirm again for outside edits. The agent gets a hidden note on the next prompt. The tab badge counts requests that can still be undone.
 - Added a built-in browser as the **Browser** tab of the right side panel, next to **Files**. It has tabs, back, forward, reload or stop, an address bar that also searches DuckDuckGo, open in the default browser, and **＋ Chat**, which attaches the page text as a Markdown attachment.
@@ -19,6 +21,7 @@ The main branch has two unreleased features on top of 0.11.0: a Changes tab for 
 
 ## Important files
 
+- `terminal.mjs` (`createTerminals`) and the `/api/chats/:id/terminal` routes (`run`, `clear`, `:entry/input`, `:entry/stop`) send `{type:'terminal', op}` events over the chat socket. `public/terminal-panel.mjs` and `public/terminal.css` provide the tab. `server.mjs` adds `instructionFiles()` and the `/api/instructions` and `/api/chats/:id/instructions[/open|/create]` routes. `public/instructions.mjs` provides the UI.
 - `git.mjs` handles status, fileChange, commit, push, and changeSummary. `server.mjs` adds `/api/chats/:id/git`, `/git/file`, `/git/commit`, `/git/push`, and `/git/message`, plus `oneShot()`. `public/git-panel.mjs` and `public/git.css` provide the Git tab.
 - `checkpoints.mjs` stores per-request checkpoints under `<data>/checkpoints/<chatId>/<turnId>.json` and handles begin, snapshot, finish, list, file, restore, and remove. `server.mjs` adds `GET /api/chats/:id/checkpoints`, `GET …/:turn/file?path=`, and `POST …/:turn/restore {path?, force?}`. Restore is refused while the chat is running.
 - `approval.ts` adds the snapshot in `tool_call` and the `bolt-note` command.
@@ -34,6 +37,7 @@ The main branch has two unreleased features on top of 0.11.0: a Changes tab for 
 
 ## Verification
 
+- Terminal and instructions: `npm test` passed 35 tests with 0 failures, including `terminal.test.mjs`, which covers running, `cd`, exit codes, stdin, stopping a 60-second command, agent mirroring, and ANSI and carriage-return cleanup. `node test/terminal-ui-check.mjs` passed with the real engine. It covers project and personal instructions reaching the model, an instruction change applying to an already open chat, opening and creating AGENTS.md, terminal commands, `cd`, history, Stop, live agent output, and Clear. A final sequential run passed all nine UI checks: terminal, git, changes, browser, files-web, ui, parallel, project-tree, and thinking-format. The sidebar drag step in `parallel-ui-check` failed twice intermittently, then passed five runs, including the same test order. A direct layout probe showed that resizing the sidebar works with every panel tab and width. Screenshots of the Terminal tab and the Instructions list were checked. Nothing is packaged or tested by hand yet.
 - Git tab: `npm test` passed 31 tests with 0 failures, including `git.test.mjs`. It covers a missing repository, first commit, selective commits with untracked files, renames, deletions, and pushing to a new and an existing upstream. `node test/git-ui-check.mjs` passed with the real engine. It covers the non-repository message, project status, diffs, an AI commit message that leaves the conversation unchanged and includes only the selected files, a selective commit, push, and upstream tracking. The changes, browser, files-web, ui, and parallel UI checks passed again. A screenshot of the Git tab was checked. It is not yet packaged or tested by hand.
 - Changes tab: `npm test` passed 28 tests with 0 failures, including the new `checkpoints.test.mjs` and `diff.test.mjs`. The real-engine `node test/changes-ui-check.mjs` passed. It covers write and edit checkpoints, diffs, file revert, undoing a request together with later ones, the hidden note reaching the model but not the chat, the outside-edit confirmation, and reload. `ui-check`, `files-web-ui-check`, `browser-ui-check`, `parallel-ui-check`, and `project-tree-ui-check` passed. A screenshot of the Changes tab was checked. It is not yet packaged or tested by hand.
 - `npm test`: 21 passed, 1 skipped (the signed real-release check), 0 failed.
@@ -46,8 +50,8 @@ The main branch has two unreleased features on top of 0.11.0: a Changes tab for 
 
 ## Next step
 
-Have the user try the Changes and Git tabs with a real model and repository. Then bump to 0.12.0, build the ARM64 portable, run the packaged checks, push `main`, and release. Next feature: a terminal tab.
+Have the user try the Changes, Git, and Terminal tabs and instructions with a real model. Then bump to 0.12.0, build the ARM64 portable, run the packaged checks, push `main`, and release. Next feature candidates: MCP servers, plan mode, @-mentions.
 
 ## Open work
 
-Keep platform claims limited to verified releases. The Windows build is unsigned. Browser tabs are not restored after restart. Undo does not cover files changed by shell commands. The agent can open and read pages, but it cannot click or type in them. A verified per-reply budget for Unsloth's OpenAI-compatible API remains outside the current release.
+Keep platform claims limited to verified releases. The Windows build is unsigned. Browser tabs are not restored after restart. Undo does not cover files changed by shell commands. The terminal has no pseudo-terminal, so full-screen programs do not work. The sidebar drag step in `parallel-ui-check` can fail intermittently. The agent can open and read pages, but it cannot click or type in them. A verified per-reply budget for Unsloth's OpenAI-compatible API remains outside the current release.

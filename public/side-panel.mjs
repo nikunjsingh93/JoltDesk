@@ -1,7 +1,7 @@
 // Tabs of the right side panel: Files, Changes and Browser share one panel.
-const MODES=['files','changes','git','browser'];
+const MODES=['files','changes','git','terminal','browser'];
 const store={get(key){try{return localStorage.getItem(key);}catch{return null;}},set(key,value){try{localStorage.setItem(key,value);}catch{}}};
-let available=new Set(['files','changes','git']);
+let available=new Set(['files','changes','git','terminal']);
 
 export function panelMode(){return document.body.dataset.panel||'files';}
 

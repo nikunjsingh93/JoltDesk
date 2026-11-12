@@ -50,6 +50,7 @@
       "connections.mjs",
       "checkpoints.mjs",
       "git.mjs",
+      "terminal.mjs",
       "web-tools.cjs",
       "browser-pane.cjs",
       "desktop-preload.cjs",

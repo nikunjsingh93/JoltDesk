@@ -1,0 +1,29 @@
+/* Terminal tab */
+:root{--terminal-width:520px}
+.panel-terminal .work-panel{width:var(--terminal-width);min-width:var(--terminal-width)}
+.terminal-view{display:flex;flex-direction:column;flex:1;min-height:0}
+.terminal-view[hidden]{display:none}
+.terminal-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted)}
+.terminal-cwd{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;font-family:Consolas,"Cascadia Mono",monospace}
+.terminal-shell{white-space:nowrap}
+.terminal-output{flex:1;min-height:0;overflow:auto;padding:6px 12px 10px;background:var(--code);font:12px/1.55 Consolas,"Cascadia Mono",monospace}
+.terminal-empty{font-family:Inter,"Segoe UI",system-ui,sans-serif}
+.term-entry{padding:7px 0;border-bottom:1px solid var(--line)}
+.term-entry:last-child{border-bottom:0}
+.term-head{display:flex;align-items:center;gap:8px;min-width:0}
+.term-src{color:var(--accent);flex:0 0 auto}
+.term-cmd{flex:1;min-width:0;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
+.term-status{flex:0 0 auto;font-size:10px;color:var(--muted);display:flex;align-items:center}
+.term-done{color:#8fc98f}.term-failed{color:#e99595}.term-stopped{color:#e2c07a}
+.light .term-done{color:#2f7d32}.light .term-failed{color:#b23b3b}.light .term-stopped{color:#9a6b00}
+.term-out{margin:5px 0 0 18px;padding:0;border:0;background:none;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:none}
+.term-entry.running .term-out{color:var(--text)}
+.term-stdin{margin:6px 0 0 18px}
+.term-stdin input{padding:5px 8px;font:inherit;font-size:11px;border-radius:6px}
+.terminal-input{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--line);background:var(--sidebar)}
+.terminal-prompt{color:var(--accent);font-family:Consolas,monospace}
+.terminal-input input{border:0;padding:6px 0;font:12px Consolas,"Cascadia Mono",monospace;background:transparent}
+/* Five tabs wrap onto a second row when the panel is narrow. */
+.panel-switch{flex-wrap:wrap;max-width:calc(100% - 36px);row-gap:2px}
+.panel-switch button{white-space:nowrap;padding:4px 10px}
+.work-panel-heading{gap:6px}
