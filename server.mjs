@@ -22,6 +22,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   const agentDir=path.join(dataDir,'agent'),sessionDir=path.join(dataDir,'sessions');
   await fs.mkdir(agentDir,{recursive:true});await fs.mkdir(sessionDir,{recursive:true});
   await fs.writeFile(path.join(agentDir,'settings.json'),JSON.stringify({defaultProjectTrust:'never',enableTelemetry:false}));
+  let startupRefresh=null;
   let key='',models=[],connected=false,connectionError=null,connectionNote='',meta={projects:[],chats:[],binary:''},secrets={};
   const stored=await vault?.get()||'';
   if(stored){try{const parsed=JSON.parse(stored);if(parsed.version===2)secrets=parsed.keys||{};}catch{secrets.openai=stored;}}
@@ -142,7 +143,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   const audit=(event)=>{auditQueue=auditQueue.then(async()=>{const file=path.join(dataDir,'diagnostics.jsonl');try{if((await fs.stat(file)).size>2000000)await fs.rename(file,path.join(dataDir,'diagnostics.previous.jsonl'));}catch{}await fs.appendFile(file,JSON.stringify({at:new Date().toISOString(),...event})+'\n');}).catch(()=>{});};
   const broadcast=(id,event)=>{const rpc=runners.get(id);if(rpc){event.seq=++rpc.eventSeq;if(rpc.viewState)reduceBackground(rpc.viewState,event);}for(const ws of subscribers.get(id)||[]) if(ws.readyState===1)ws.send(JSON.stringify(event));};
   const endpointStatuses=new Map(),endpointChecks=new Map();
-  const config=()=>({version:appVersion,instructions:meta.instructions||'',connected,connection,connections:meta.connections.map(c=>({...c,status:endpointStatuses.get(c.id)||{state:'saved'},hasSavedKey:!!secrets[credentialId(c)],hasSessionKey:!!sessionKeys[credentialId(c)]})),runningChats:[...runners].filter(([,r])=>r.busy).map(([id])=>id),connectionError,connectionNote,preferredModel:meta.preferredModels?.[credentialId(connection)]||null,hasSavedKey:!!secrets[credentialId(connection)],secureStorage:!!vault,models,projects:meta.projects,chats:meta.chats,binary:selectedBinary(),native:!!native,webAvailable:!!native?.webTools,browserAvailable:!!native?.browser,engine:engine?.status()||null,customEngine:!!meta.binary});
+  const config=()=>({version:appVersion,refreshing:!!startupRefresh,instructions:meta.instructions||'',connected,connection,connections:meta.connections.map(c=>({...c,status:endpointStatuses.get(c.id)||{state:'saved'},hasSavedKey:!!secrets[credentialId(c)],hasSessionKey:!!sessionKeys[credentialId(c)]})),runningChats:[...runners].filter(([,r])=>r.busy).map(([id])=>id),connectionError,connectionNote,preferredModel:meta.preferredModels?.[credentialId(connection)]||null,hasSavedKey:!!secrets[credentialId(connection)],secureStorage:!!vault,models,projects:meta.projects,chats:meta.chats,binary:selectedBinary(),native:!!native,webAvailable:!!native?.webTools,browserAvailable:!!native?.browser,engine:engine?.status()||null,customEngine:!!meta.binary});
   function rememberProfile(){if(!connection.id)return;const i=meta.connections.findIndex(c=>c.id===connection.id);const p={...connection,models};if(i<0)meta.connections.push(p);else meta.connections[i]=p;meta.connection=connection;if(connected)endpointStatuses.set(connection.id,{state:'connected',checkedAt:Date.now()});}
   async function checkEndpoint(profile){
     if(endpointChecks.has(profile.id))return endpointChecks.get(profile.id);
@@ -734,7 +735,24 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   app.use((error,_req,res,_next)=>res.status(400).json({error:error.message}));
   await new Promise(resolve=>http.listen(port,'127.0.0.1',resolve));
   const address=`http://127.0.0.1:${http.address().port}`;
-  if(connection.autoConnect!==false&&(key||connection.provider==='local')){try{const result=await connectionModels(connection,key);models=result.models;connectionNote=result.note;connected=models.length>0;rememberProfile();await save();}catch(e){connectionError=e.message;}}
+  // Start with the models saved last time so the window opens at once, then check
+  // the API in the background. A slow or busy model server no longer delays startup.
+  if(connection.autoConnect!==false&&(key||connection.provider==='local')){
+    const saved=meta.connections.find(c=>c.id===connection.id);
+    if(saved?.models?.length){models=saved.models;connected=true;}
+    const target={id:connection.id,revision:connection.revision};
+    const current=()=>connection.id===target.id&&connection.revision===target.revision&&!changingConnection;
+    startupRefresh=(async()=>{
+      try{
+        const result=await connectionModels({...connection},key);
+        if(!current())return;
+        models=result.models;connectionNote=result.note;connected=models.length>0;connectionError=null;rememberProfile();await save();
+      }catch(e){
+        if(!current())return;
+        if(connected)connectionNote='Using the models saved last time. '+e.message;else connectionError=e.message;
+      }finally{startupRefresh=null;}
+    })();
+  }
   if(autoStartUpdates)engine?.start();
   return {url:address,token,close:()=>{engine?.close();terminals.closeAll();for(const rpc of runners.values())rpc.close();for(const ws of wss.clients)ws.close();http.close();}};
 }

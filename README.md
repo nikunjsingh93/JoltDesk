@@ -4,6 +4,8 @@ A standalone desktop GUI with **Pi-Bolt built in**, connected through its stream
 
 ## Run on Windows ARM64
 
+Use **JoltDesk-Setup-<version>-arm64.exe** for the fastest start. It installs JoltDesk for your user, with no administrator prompt, and opens in about a second. The portable exe works without installing, but it unpacks the whole app to a temporary folder on every launch, which can take 10–30 seconds. Both use the same chats and settings.
+
 1. Open **JoltDesk-0.14.0-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
 2. Open **Settings & connection**, select OpenAI or Local / OpenAI-compatible API, enter connection details, and click **Connect & discover models**.
 3. Pick a model and start chatting. No manual `models.json` changes, terminal commands, or Node installation are needed for the portable build.

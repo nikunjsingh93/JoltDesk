@@ -16,7 +16,9 @@
     "preportable": "node verify-bundle.mjs",
     "predist": "node verify-bundle.mjs",
     "prestart": "node ensure-engine.mjs",
-    "preweb": "node ensure-engine.mjs"
+    "preweb": "node ensure-engine.mjs",
+    "installer": "electron-builder --win nsis",
+    "preinstaller": "node verify-bundle.mjs"
   },
   "dependencies": {
     "dompurify": "^3.2.7",
@@ -83,7 +85,17 @@
         ]
       }
     ],
-    "compression": "normal"
+    "compression": "normal",
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "JoltDesk",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "JoltDesk-Setup-${version}-${arch}.${ext}"
+    }
   },
   "license": "MIT",
   "repository": {

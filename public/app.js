@@ -690,4 +690,8 @@ document.addEventListener('click',e=>{
 });
 // Startup buttons stay disabled until their handlers are attached and the workspace has loaded.
 try{config=await api('/config');renderSidebar();renderChat();updateMetrics();}catch(e){toast(e.message);}
-finally{document.querySelectorAll('[data-startup]').forEach(button=>button.disabled=false);if(config?.version){$('#app-version').textContent='v'+config.version;$('#app-version').title='JoltDesk '+config.version;}}
+finally{
+  // The server checks the API in the background after startup. Refresh once it finishes.
+  const followStartup=async()=>{if(!config?.refreshing)return;try{const next=await api('/config');const busy=current&&running;config={...next,refreshing:next.refreshing};if(!busy){renderSidebar();renderModels();updateMetrics();}if(next.refreshing)setTimeout(followStartup,1000);}catch{}};
+  setTimeout(followStartup,800);
+  document.querySelectorAll('[data-startup]').forEach(button=>button.disabled=false);if(config?.version){$('#app-version').textContent='v'+config.version;$('#app-version').title='JoltDesk '+config.version;}}
