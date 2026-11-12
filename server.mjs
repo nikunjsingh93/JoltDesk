@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Rpc, findBinary } from './rpc.mjs';
 import { EngineManager } from './engine-updater.mjs';
-import { LOCAL_PROVIDER, OPENAI_CONNECTION, normalizeBaseUrl, optionalInteger, credentialId, discoverLocal, studioStatus, studioContextFor, studioVisionFor } from './connections.mjs';
+import { ASSUMED_CONTEXT, LOCAL_PROVIDER, OPENAI_CONNECTION, normalizeBaseUrl, optionalInteger, credentialId, discoverLocal, studioStatus, studioContextFor, studioVisionFor } from './connections.mjs';
 import { completedMetrics } from './public/reply-metrics.mjs';
 import {makeRuntime,reduceBackground,collectInspector} from './public/chat-runtime.mjs';
 import { createCheckpoints } from './checkpoints.mjs';
@@ -219,6 +219,9 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
       if(profile.provider==='local'){
         const fields=['id','name','reasoning','input','contextWindow','maxTokens','cost','compat','thinkingLevelMap','samplingParams','samplingParamsByThinkingLevel'];
         let definition;
+        // Saved models from older versions may carry a small guessed window; never give
+        // the engine less than the generous assumption for an unconfirmed window.
+        profileModels=profileModels.map(m=>m.contextWindowEstimated&&m.contextWindow<ASSUMED_CONTEXT?{...m,contextWindow:ASSUMED_CONTEXT,maxTokens:profile.maxTokens==='auto'?ASSUMED_CONTEXT:m.maxTokens}:m);
         if(profileModels.length)definition={baseUrl:profile.baseUrl,api:'openai-completions',apiKey:'$BOLT_LOCAL_API_KEY',authHeader:true,headers:{Accept:'text/event-stream','Accept-Encoding':'identity','Cache-Control':'no-cache'},models:profileModels.map(m=>Object.fromEntries(fields.filter(k=>m[k]!==undefined).map(k=>[k,m[k]])))};
         else {const discovered=await discoverLocal(profile,candidate);definition=discovered.definition;profileModels=definition.models.map(m=>({...m,provider:LOCAL_PROVIDER}));}
         registry.providers={...registry.providers,[LOCAL_PROVIDER]:definition};

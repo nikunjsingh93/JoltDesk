@@ -4,11 +4,11 @@ A standalone desktop GUI with **Pi-Bolt built in**, connected through its stream
 
 ## Run on Windows ARM64
 
-For the fastest start, download **JoltDesk-<version>-win-arm64.zip**, extract it to any folder, and run **JoltDesk.exe** inside it. Nothing is installed, and it opens in about a second. Pin the running app to the taskbar as usual. **JoltDesk-Setup-<version>-arm64.exe** installs the same app for your user instead. The single-file portable exe also works without installing, but it unpacks the whole app to a temporary folder on every launch, which can take 10–30 seconds. All three use the same chats and settings.
+Download **JoltDesk-<version>-win-arm64.zip**, extract it to any folder, and run **JoltDesk.exe** inside it. Nothing is installed, and it opens in about a second. Pin the running app to the taskbar as usual. Releases before 0.14 shipped a single-file portable exe, which unpacked the whole app on every launch and was much slower to start.
 
-1. Open **JoltDesk-0.14.0-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
+1. Extract **JoltDesk-<version>-win-arm64.zip** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
 2. Open **Settings & connection**, select OpenAI or Local / OpenAI-compatible API, enter connection details, and click **Connect & discover models**.
-3. Pick a model and start chatting. No manual `models.json` changes, terminal commands, or Node installation are needed for the portable build.
+3. Pick a model and start chatting. No manual `models.json` changes, terminal commands, or Node installation are needed.
 
 This delivery targets Windows ARM64 only. It contains its own engine and needs no existing Pi-Bolt installation.
 
@@ -272,7 +272,7 @@ node test/chat-refinements-check.mjs # thinking follow, reply metrics, layout an
 node test/live-stream-ui-check.mjs # text before completion, streamed tool code and a buffered-response clock regression
 node test/packaged-check.mjs # packaged Windows test with external Pi-Bolt disabled
 node test/updater-ui-check.mjs # full update-button test using cached signed release fixtures
-npm run portable      # build Windows portable executable on a Windows build machine
+npm run zip           # build the Windows zip (extract and run JoltDesk.exe)
 npm run dist          # build an unpacked app for the host platform
 ```
 

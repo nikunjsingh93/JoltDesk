@@ -1,4 +1,5 @@
 export const LOCAL_PROVIDER='bolt-local';
+export const ASSUMED_CONTEXT=131072;
 export const OPENAI_CONNECTION={provider:'openai',baseUrl:'https://api.openai.com/v1',autoConnect:true};
 export function normalizeBaseUrl(value){
   let u;try{u=new URL(String(value||'').trim());}catch{throw new Error('Enter a complete API URL, such as http://127.0.0.1:8080/v1.');}
@@ -93,7 +94,10 @@ export async function discoverLocal(connection,key,fetcher=fetch){
       unsloth&&m.supports_reasoning!==false&&p.supports_reasoning!==false&&/qwen3[._-]8(?:[-:/]|$)/i.test(id+' '+(m.root||''))?['low','medium','xhigh']:undefined;
     const detected=optionalInteger((unsloth?studioContextFor(studio,{id,name:m.name,root:m.root}):null)||p.default_generation_settings?.n_ctx||p.n_ctx||m.meta?.n_ctx||m.context_window||m.context_length||m.contextWindow||m.max_model_len||null,'Reported context',1);
     const native=optionalInteger(m.native_context_length||m.meta?.n_ctx_train||null,'Native context',1);
-    const contextWindow=ctxOverride||detected||native||Math.max(32768,maxOverride||0);
+    // An unknown window must not be guessed small: the engine compacts at about 90%
+    // of it, and each compaction resends the whole conversation. With a generous
+    // assumption, a real overflow from the server triggers the engine's recovery instead.
+    const contextWindow=ctxOverride||detected||native||Math.max(ASSUMED_CONTEXT,maxOverride||0);
     const maxTokens=autoOutput?contextWindow:maxOverride||Math.min(4096,Math.max(1,Math.floor(contextWindow/2)));
     if(maxTokens>contextWindow)throw new Error(`Max output tokens exceeds the context window for ${id}. Set a context window explicitly.`);
     const reasoning=connection.thinking==='on'||connection.thinking!=='off'&&(
