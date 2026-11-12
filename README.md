@@ -4,7 +4,7 @@ A standalone desktop GUI with **Pi-Bolt built in**, connected through its stream
 
 ## Run on Windows ARM64
 
-1. Open **JoltDesk-0.12.0-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
+1. Open **JoltDesk-0.13.0-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
 2. Open **Settings & connection**, select OpenAI or Local / OpenAI-compatible API, enter connection details, and click **Connect & discover models**.
 3. Pick a model and start chatting. No manual `models.json` changes, terminal commands, or Node installation are needed for the portable build.
 
@@ -24,7 +24,7 @@ Screenshots use a demo workspace and simulated model connections.
 
 ![JoltDesk settings showing both a local Qwen API and an OpenAI API marked connected](docs/screenshots/connections.png)
 
-## Skills (unreleased)
+## Skills in 0.13
 
 A skill is a folder with a `SKILL.md` file that teaches the agent a specific task, using the open [Agent Skills](https://agentskills.io/specification) format. The agent sees each skill's name and description, and reads the full instructions only when a request matches. Type `/` in the message box to pick a skill, or type `/skill:name` followed by details to run one directly.
 
