@@ -67,7 +67,7 @@ JoltDesk 0.14.1 is published as the [0.14.1 release](https://github.com/nikunjsi
 
 ## Next step
 
-Release the cache-stability work as 0.14.2, as a zip (`npm run zip -- --arm64`, with output to `release-dist` while the user's copy locks `release/`). Then continue with a lead agent and helper agents (subagents).
+Continue with a lead agent and helper agents (subagents).
 
 ## Open work
 
