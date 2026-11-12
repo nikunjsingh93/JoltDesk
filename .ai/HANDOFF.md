@@ -70,7 +70,7 @@ JoltDesk 0.14.2 is the latest published release ([0.14.2](https://github.com/nik
 
 ## Next step
 
-Release the lean-prompt work as 0.14.3 (zip) when the user asks. Then ask the user to confirm on their laptop that new chats start faster and that toggling Web keeps the cache. After that, continue with a lead agent and helper agents (subagents).
+Ask the user to confirm on their laptop that new chats start faster and that toggling Web keeps the cache. After that, continue with a lead agent and helper agents (subagents).
 
 Release process: `npm version <x> --no-git-tag-version`, commit, push, `node verify-bundle.mjs`, then `npx electron-builder --win zip --arm64 --config.directories.output=release-dist` in the background (the zip step takes several minutes). Publish with `gh release create v<x> release-dist/JoltDesk-<x>-win-arm64.zip`. Publish only when the user asks. The safety check blocks releases they did not request.
 
