@@ -49,6 +49,9 @@ try{
   await expect(page.locator('#context')).not.toContainText('/');
   await page.locator('#prompt').fill('A long prompt');await page.locator('#send').click();
   await expect(page.locator('#activity-text')).toHaveText('Processing prompt · 43% (430 / 1,000 tokens, 120 cached)',{timeout:15000});
+  // While the prompt is read, the meter shows the server's prompt size rather than zero,
+  // and the real limit appears before the reply.
+  await expect(page.locator('#context')).toContainText('Context 1,000');
   await expect(page.locator('#context')).toContainText('/ 128,640',{timeout:4000});
   await expect(page.locator('#messages')).toContainText('Prompt processed.',{timeout:15000});
   assert.equal(requests[0].return_progress,true);

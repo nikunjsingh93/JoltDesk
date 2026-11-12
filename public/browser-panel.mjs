@@ -21,8 +21,10 @@ export function initBrowserPanel({toast,onAttach,showPanel}){
   const rect=()=>{const r=viewport.getBoundingClientRect();return {x:r.left,y:r.top,width:Math.max(0,r.width),height:Math.max(0,r.height)};};
   let frame=0,shown=false;
   function sync(){
-    cancelAnimationFrame(frame);
-    frame=requestAnimationFrame(()=>{
+    cancelAnimationFrame(frame);clearTimeout(frame);
+    // Hidden windows run no animation frames, so use a timer then.
+    const schedule=document.hidden?callback=>setTimeout(callback,0):requestAnimationFrame;
+    frame=schedule(()=>{
       const want=wanted();
       if(want!==shown){shown=want;command(want?'show':'hide',want?rect():undefined);}
       else if(want)bridge.command('bounds',rect()).catch(()=>{});

@@ -102,6 +102,8 @@ try{
   await send('Take a screenshot.');
   assert.equal(webRequests.at(-1).kind,'browser-screenshot');
   assert.match(JSON.stringify(provider.requests.at(-1)),/ZmFrZS1qcGVn/);
+  // The screenshot appears in the chat, not as an empty result box.
+  await expect(page.locator('#messages .tool .tool-image').last()).toHaveAttribute('src','data:image/jpeg;base64,ZmFrZS1qcGVn');
   for(const name of ['browser_click','browser_type','browser_press','browser_scroll','browser_screenshot'])assert.ok(declared(provider.requests.at(-1)).includes(name),name+' should be offered');
   await page.reload();
   await page.locator('.open-chat').click();

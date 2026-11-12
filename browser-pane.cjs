@@ -163,7 +163,15 @@ function createBrowserPane({window,appOrigin,checkAgentUrl}){
     getActiveTab:()=>tabs.find(t=>t.id===active),
     createTab,waitForLoad,
     reveal:()=>emit({type:'reveal'}),
-    isAttached:tab=>tab.attached
+    isAttached:tab=>tab.attached,
+    // Attaches a tab at its last position even if the page has not reported a layout,
+    // falling back to the right part of the window.
+    forceShow:tab=>{
+      if(!(bounds.width>0&&bounds.height>0)){const [width,height]=window.getContentSize();bounds={x:Math.round(width*0.55),y:120,width:Math.round(width*0.45),height:Math.max(200,height-130)};}
+      visible=true;active=tab.id;
+      if(!window.contentView.children.includes(tab.view))tab.attached=false;
+      layout();
+    }
   });
 
   ipcMain.handle('browser:command',(event,name,arg)=>{

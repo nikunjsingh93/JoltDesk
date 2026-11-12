@@ -94,3 +94,5 @@
 .confirm-note{font-size:11px}
 .primary-inline{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
 .primary-inline:hover{background:#e2efca}
+/* Images in tool results, such as browser screenshots. */
+.tool .tool-image{display:block;max-width:calc(100% - 20px);max-height:420px;margin:0 10px 10px;border:1px solid var(--line);border-radius:6px}

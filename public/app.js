@@ -12,6 +12,7 @@ const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=
 let config, current, projectId=null, ws, files=[], messages=[], streaming=null, running=false, started=0, chars=0, usage={}, stats={}, approval, generation=0, finalSeconds=0,followChat=true;
 const toolNodes=new Map();
 const chatStates=new Map();
+let promptTotal=0;
 let changesPanel=null,gitPanel=null,instructionsPanel=null,terminalPanel=null,skillsPanel=null;
 function saveCurrentState(){if(!current)return;const s=chatStates.get(current.id);if(!s)return;Object.assign(s,{chat:current,messages,streaming,running,started,chars,usage,stats,finalSeconds,ws,files,draft:$('#prompt').value,followChat,stage:$('#activity-text').textContent,approval});}
 function parkActivity(){const activity=$('#activity');if(activity)$('#activity-parking').append(activity);}
@@ -198,6 +199,16 @@ function renderThinkingBlock(block,box,open){
   return box;
 }
 const toolViews=new WeakMap();
+// Draws image parts of a tool result, such as a browser screenshot, under its text.
+function showToolImages(box,content){
+  const images=(content||[]).filter(c=>c.type==='image'&&/^image\/(png|jpeg|webp|gif)$/.test(c.mimeType||'')&&typeof c.data==='string');
+  box.querySelectorAll('.tool-image').forEach(img=>img.remove());
+  for(const part of images){
+    const img=document.createElement('img');
+    img.className='tool-image';img.alt='Tool result image';img.src=`data:${part.mimeType};base64,${part.data}`;
+    box.append(img);
+  }
+}
 const fileLanguages={html:'html',htm:'html',js:'javascript',ts:'typescript',py:'python',css:'css',json:'json',md:'markdown'};
 function renderToolBlock(block,box,open){
   if(!box){
@@ -325,7 +336,7 @@ function paintReplyMetrics(m,el){
 function renderChat(){
   parkActivity();$('#welcome').classList.toggle('hidden',messages.length>0);$('#messages').replaceChildren();toolNodes.clear();
   for(const m of messages){if(['user','assistant'].includes(m.role)){m.el=messageNode(m);$('#messages').append(m.el);}else if(m.role==='toolResult'){
-    const d=document.createElement('details');d.className='tool';d.innerHTML=`<summary>↳ ${esc(m.toolName||'Tool result')}</summary><pre>${esc((m.content||[]).map(c=>c.text||'').join('\n'))}</pre>`;$('#messages').append(d);
+    const d=document.createElement('details');d.className='tool';d.innerHTML=`<summary>↳ ${esc(m.toolName||'Tool result')}</summary><pre>${esc((m.content||[]).map(c=>c.text||'').join('\n'))}</pre>`;showToolImages(d,m.content);$('#messages').append(d);
   }}
   $('#chat-title').textContent=current?.title||'New conversation';$('#permission').value=current?.mode||'chat';$('#permission').classList.toggle('bypass',current?.mode==='bypass');
   $('#web-tools').checked=!!current?.webEnabled;
@@ -345,7 +356,12 @@ function updateMetrics(){
   // An estimated limit is not shown: the engine's own stats carry the same guess.
   const selectedModel=config?.models.find(m=>m.id===$('#model').value),c=stats.contextUsage,windowSize=selectedModel?.contextWindowEstimated?null:selectedModel?.contextWindow||c?.contextWindow;
   const liveInput=Number(usage.input||0)+Number(usage.cacheRead||0)+Number(usage.cacheWrite||0);
-  const contextTokens=running?(liveInput||c?.tokens||0)+output:c?.tokens??(!current?0:null);
+  // Each agent step starts a new reply with empty usage. Prefer the exact prompt size the
+  // server reports, then live usage, then the previous step's total,
+  // so the meter never drops to zero mid-run.
+  const lastUsage=messages.findLast(m=>m.role==='assistant'&&!m.live&&m.usage)?.usage;
+  const lastContext=lastUsage?Number(lastUsage.input||0)+Number(lastUsage.cacheRead||0)+Number(lastUsage.cacheWrite||0)+Number(lastUsage.output||0):null;
+  const contextTokens=running?(promptTotal?promptTotal+output:liveInput?liveInput+output:(lastContext||c?.tokens||0)+output):(c?.tokens||lastContext)??(!current?0:null);
   const percent=windowSize?100*(contextTokens||0)/windowSize:0;
   $('#context').textContent=windowSize&&contextTokens!=null?`Context ${running&&!liveInput?'~':''}${Number(contextTokens).toLocaleString()} / ${Number(windowSize).toLocaleString()} · ${percent.toFixed(1)}%`:windowSize?`Context — / ${Number(windowSize).toLocaleString()}`:contextTokens?`Context ${Number(contextTokens).toLocaleString()}`:'Context —';
   $('#context').title=windowSize?'':'The server has not reported this model’s context limit yet.';
@@ -378,7 +394,7 @@ function showOffline(info){
   else if(info.kind==='removed'){toast('This chat’s API was removed. You can read this chat. Pick a model to continue.');$('#status').textContent='API removed';}
   else{toast(`This chat could not start: ${info.message} Showing the saved conversation. Pick a model to continue.`);$('#status').textContent='Read-only';}
 }
-function restoreChatState(s){current=s.chat;messages=s.messages;streaming=s.streaming;running=s.running;started=s.started;chars=s.chars;usage=s.usage;stats=s.stats;finalSeconds=s.finalSeconds;ws=s.ws;files=s.files;followChat=s.followChat;approval=s.approval;$('#prompt').value=s.draft||'';$('#activity-text').textContent=s.stage;renderFiles();renderSidebar();renderChat();setRunning(s.running);$('#activity-text').textContent=s.stage;$('#status').textContent=s.running?(s.stage?.startsWith('Thinking')?'Generating':s.stage):'Pi-Bolt connected';if(approval)showApproval(approval);scrollBottom();document.body.classList.remove('sidebar-open');}
+function restoreChatState(s){promptTotal=0;current=s.chat;messages=s.messages;streaming=s.streaming;running=s.running;started=s.started;chars=s.chars;usage=s.usage;stats=s.stats;finalSeconds=s.finalSeconds;ws=s.ws;files=s.files;followChat=s.followChat;approval=s.approval;$('#prompt').value=s.draft||'';$('#activity-text').textContent=s.stage;renderFiles();renderSidebar();renderChat();setRunning(s.running);$('#activity-text').textContent=s.stage;$('#status').textContent=s.running?(s.stage?.startsWith('Thinking')?'Generating':s.stage):'Pi-Bolt connected';if(approval)showApproval(approval);scrollBottom();document.body.classList.remove('sidebar-open');}
 function deliverChatEvent(s,e){
   if(e.type==='config_changed'){api('/config').then(next=>{config=next;renderModels();updateMetrics();}).catch(()=>{});return;}
   if(e.type==='chat_updated'){const c=config.chats.find(c=>c.id===s.chat.id);if(c)Object.assign(c,e.chat);}
@@ -401,12 +417,14 @@ function updateStreamNode(m){
 function renderStream(){if(renderScheduled)return;renderScheduled=true;setTimeout(()=>{renderScheduled=false;if(streaming?.el)updateStreamNode(streaming);},55);}
 function onEvent(e){
   if(e.type==='generation_timing'&&streaming){streaming.serverTimings=e.timings;paintReplyMetrics(streaming,streaming.el);}
+  if(e.type==='prompt_progress'&&e.total>0){promptTotal=Number(e.total);updateMetrics();}
   if(e.type==='prompt_progress'&&running&&!chars&&e.total>0){
     const done=Math.min(e.total,Number(e.processed||0)),percent=Math.floor(100*done/e.total);
     $('#activity-text').textContent=`Processing prompt · ${percent}% (${done.toLocaleString()} / ${Number(e.total).toLocaleString()} tokens${e.cache?`, ${Number(e.cache).toLocaleString()} cached`:''})`;
     $('#status').textContent=`Processing ${percent}%`;
   }
   if(e.type==='generation_start'){
+    promptTotal=0;
     streaming={role:'assistant',content:[],model:e.model||$('#model').value,live:true,placeholder:true,startedAt:performance.now()-(e.elapsedMs||0)};chars=0;usage={};messages.push(streaming);streaming.el=messageNode(streaming);$('#messages').append(streaming.el);$('#activity-text').textContent='Processing request · awaiting streamed tokens…';$('#status').textContent='Processing';scrollBottom();
     mountActivity(streaming);$('#activity').classList.remove('hidden');
   }
@@ -437,7 +455,7 @@ function onEvent(e){
     $('#activity-text').textContent=`Running ${e.toolName}…`;const d=document.createElement('details');d.open=true;d.className='tool';d.innerHTML=`<summary>⌘ ${esc(e.toolName)} · running</summary><pre></pre>`;d.querySelector('pre').textContent=JSON.stringify(e.args,null,2);toolNodes.set(e.toolCallId,d);$('#messages').append(d);scrollBottom();
   }
   if(['tool_execution_update','tool_execution_end'].includes(e.type)){
-    const d=toolNodes.get(e.toolCallId);if(d){const result=e.result||e.partialResult;d.querySelector('pre').textContent=(result?.content||[]).map(c=>c.text||'').join('\n');if(e.type==='tool_execution_end'){d.querySelector('summary').textContent=`${e.isError?'✕':'✓'} ${e.toolName} · ${e.durationMs!=null?(e.durationMs/1000).toFixed(2)+'s':'finished'}`;d.open=false;}}scrollBottom();
+    const d=toolNodes.get(e.toolCallId);if(d){const result=e.result||e.partialResult;d.querySelector('pre').textContent=(result?.content||[]).map(c=>c.text||'').join('\n');showToolImages(d,result?.content);if(e.type==='tool_execution_end'){d.querySelector('summary').textContent=`${e.isError?'✕':'✓'} ${e.toolName} · ${e.durationMs!=null?(e.durationMs/1000).toFixed(2)+'s':'finished'}`;d.open=false;}}scrollBottom();
   }
   if(e.type==='agent_settled'){setRunning(false);streaming=null;$('#status').textContent=messages.findLast(m=>m.role==='assistant')?.stopReason==='aborted'?'Stopped':'Response complete';}
   if(e.type==='agent_start'&&!running)setRunning(true);

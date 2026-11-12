@@ -89,7 +89,7 @@ async function resolveAgentUrl(value,{allowFiles,checkPublic}){
   return checkPublic(url.href);
 }
 
-function createBrowserAgent({getActiveTab,createTab,waitForLoad,reveal,isAttached}){
+function createBrowserAgent({getActiveTab,createTab,waitForLoad,reveal,isAttached,forceShow}){
   const call=(tab,fn,...args)=>tab.view.webContents.executeJavaScriptInIsolatedWorld(WORLD,[{code:`(${fn})(${args.map(a=>JSON.stringify(a)).join(',')})`}]);
   const readable=url=>/^(https?|file):/i.test(url);
   async function activeTab(){
@@ -170,8 +170,13 @@ function createBrowserAgent({getActiveTab,createTab,waitForLoad,reveal,isAttache
       }
       case 'browser-screenshot':{
         await sleep(150);
-        let image=await contents.capturePage();
-        if(image.isEmpty())throw new Error('The browser is hidden, so it cannot take a screenshot. Open the Browser tab and try again.');
+        // capturePage never settles for a view that is not on a window, so cap the wait.
+        const capture=()=>Promise.race([contents.capturePage(),sleep(3000).then(()=>null)]);
+        let image=await capture();
+        // An empty capture means the page view is not on the window yet, for example
+        // while the window is hidden. Put it back where it was shown last and retry.
+        if(!image||image.isEmpty()){forceShow(tab);await sleep(500);image=await capture();}
+        if(!image||image.isEmpty())throw new Error('The browser could not take a screenshot of this page. Show the JoltDesk window and try again.');
         if(image.getSize().width>1280)image=image.resize({width:1280});
         return {url:contents.getURL(),title:contents.getTitle(),image:image.toJPEG(72).toString('base64'),mimeType:'image/jpeg'};
       }

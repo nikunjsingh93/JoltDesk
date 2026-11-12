@@ -69,6 +69,34 @@ try{
   assert.equal(result.ok.mimeType,'image/jpeg');
   assert.ok(Buffer.from(result.ok.image,'base64').length>2000);
 
+  // Screenshots still work while the user looks at another tab or the window is minimized.
+  await window.locator('#panel-files').click();
+  result=await agent('browser-screenshot');
+  assert.equal(result.error,undefined,'with the Files tab showing: '+result.error);
+  assert.ok(Buffer.from(result.ok.image,'base64').length>2000);
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].minimize());
+  await new Promise(r=>setTimeout(r,800));
+  result=await agent('browser-screenshot');
+  assert.equal(result.error,undefined,'with the window minimized: '+result.error);
+  assert.ok(Buffer.from(result.ok.image,'base64').length>2000);
+  assert.ok(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isMinimized()),'the screenshot must not restore the window');
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].restore());
+  // The case from real use: the panel shows another tab, then the window is minimized.
+  await window.locator('#panel-files').click();
+  await new Promise(r=>setTimeout(r,300));
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].minimize());
+  await new Promise(r=>setTimeout(r,800));
+  result=await agent('browser-screenshot');
+  assert.equal(result.error,undefined,'with another tab showing and the window minimized: '+result.error);
+  assert.ok(Buffer.from(result.ok.image,'base64').length>2000);
+  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].restore());
+  await expect(window.locator('#browser-view')).toBeVisible();
+  // When the view has been taken off the window, the screenshot puts it back and retries.
+  await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];for(const view of [...w.contentView.children])w.contentView.removeChildView(view);});
+  result=await agent('browser-screenshot');
+  assert.equal(result.error,undefined,'with the view detached: '+result.error);
+  assert.ok(Buffer.from(result.ok.image,'base64').length>2000);
+
   // Local files need file permission; LAN addresses stay blocked.
   result=await agent('browser-open',{url:localFile},{allowFiles:false});
   assert.match(result.error,/Read files permission/);
