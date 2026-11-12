@@ -54,6 +54,7 @@ export default function(pi: any) {
   const fullTools=['read','write','edit','bash','powershell','grep','find','ls'];
   const webUrl=process.env.BOLT_WEB_URL;
   const webKey=process.env.BOLT_WEB_KEY;
+  const delegateUrl=process.env.BOLT_DELEGATE_URL,delegateKey=process.env.BOLT_DELEGATE_KEY;
   const browserActions=['browser_click','browser_type','browser_press'];
   const browserTools=['browser_open','browser_read','browser_click','browser_type','browser_press','browser_scroll','browser_screenshot'];
   const webTools=['web_search','browse_page',...browserTools];
@@ -105,13 +106,22 @@ export default function(pi: any) {
       });
     }
   }
+  if(delegateUrl&&delegateKey){
+    pi.registerTool({name:'delegate_tasks',label:'Delegate tasks',description:'Delegate independent tasks to configured workers in parallel. For questions, use mode questions: workers have no file or web tools, so include all needed context in each task. For project edits, use mode coding: workers use separate Git worktrees and coding needs Ask or Bypass plus a clean committed project. Review their results; do not apply changes without user review. Workers in task order: '+(process.env.BOLT_DELEGATE_WORKERS||'[]'),defaultActive:false,
+      parameters:object({mode:{type:'string',enum:['questions','coding'],description:'questions for independent answers without tools or Git; coding for project edits in Git worktrees. Defaults to questions.'},tasks:{type:'array',description:'One independent task per configured worker, in worker order. Include all context each worker needs.',items:{type:'string'},minItems:1,maxItems:3}},['tasks']),
+      async execute(_id:string,input:any,signal?:AbortSignal){
+        const response=await fetch(delegateUrl,{method:'POST',headers:{'Content-Type':'application/json','X-Bolt-Worker-Key':delegateKey},body:JSON.stringify(input),signal});
+        const result=await response.json();if(!response.ok)throw new Error(result.error||'Worker tasks failed.');
+        return {content:[{type:'text',text:JSON.stringify(result)}]};
+      }});
+  }
   // Local model servers cache the processed prompt by its prefix. For them every tool
   // stays declared in a fixed order and the system prompt never changes, so toggling
   // Web or permissions does not force the whole conversation to be processed again.
   // Permissions are enforced when a tool is called instead.
   const stableTools=process.env.BOLT_STABLE_TOOLS==='1';
   const known=()=>new Set(pi.getAllTools().map((t: any)=>t.name));
-  const toolsFor=(level: string,web: boolean)=>[...(level==='chat'?[]:level==='read'?readTools:fullTools),...(web?['web_search','browse_page']:[]),...((web||level!=='chat')?browserTools:[])];
+  const toolsFor=(level: string,web: boolean)=>[...(level==='chat'?[]:level==='read'?readTools:fullTools),...(delegateUrl?['delegate_tasks']:[]),...(web?['web_search','browse_page']:[]),...((web||level!=='chat')?browserTools:[])];
   const allowed=()=>{const k=known();return toolsFor(mode!,webEnabled).filter(name=>k.has(name));};
   // A chat declares only the tools it has needed so far, and the set never shrinks:
   // a new chat-only chat sends no tool definitions, and toggling back and forth does

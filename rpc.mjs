@@ -14,7 +14,7 @@ export function findBinary(override) {
 }
 
 export class Rpc extends EventEmitter {
-  constructor({binary, cwd, agentDir, sessionDir, sessionId, key, mode='chat', extension,serverTimings=false,autoOutput=false,webAccess,skills=[],stableTools=false,declared={}}) {
+  constructor({binary, cwd, agentDir, sessionDir, sessionId, key, mode='chat', extension,serverTimings=false,autoOutput=false,webAccess,skills=[],stableTools=false,declared={},delegateAccess}) {
     super(); this.pending = new Map(); this.buffer = ''; this.diagnostics = ''; this.closed = false;
     const args = ['--mode','rpc','--no-extensions','--no-skills','--no-prompt-templates','--no-mcp',
       '--session-dir',sessionDir,'--session-id',sessionId];
@@ -23,6 +23,7 @@ export class Rpc extends EventEmitter {
       if(process.platform==='win32')tools.push('powershell');
       tools.push('grep','find','ls');
       if(webAccess)tools.push('web_search','browse_page');
+      if(delegateAccess)tools.push('delegate_tasks');
       if(webAccess?.browser)tools.push('browser_open','browser_read','browser_click','browser_type','browser_press','browser_scroll','browser_screenshot');
       args.push('--tools',tools.join(','));
     }
@@ -33,7 +34,7 @@ export class Rpc extends EventEmitter {
     // Discovery stays off; only skills the app selected are loaded.
     for(const skill of skills) args.push('--skill', skill);
     this.child = spawn(binary,args,{cwd,windowsHide:true,env:{...process.env,PI_CODING_AGENT_DIR:agentDir,
-      OPENAI_API_KEY:key || 'discovery-only-no-api-key', BOLT_LOCAL_API_KEY:key||'local-no-key', BOLT_PERMISSION_MODE:mode, BOLT_LLAMA_TIMINGS:serverTimings?'1':'0', BOLT_AUTO_OUTPUT:autoOutput?'1':'0', BOLT_WEB_URL:webAccess?.url||'', BOLT_WEB_KEY:webAccess?.key||'', BOLT_BROWSER:webAccess?.browser?'1':'0', BOLT_STABLE_TOOLS:stableTools?'1':'0', BOLT_DECLARED_MODE:declared.mode||'', BOLT_DECLARED_WEB:declared.web?'1':'0', PI_OFFLINE:'1', PI_TELEMETRY:'0'}});
+      OPENAI_API_KEY:key || 'discovery-only-no-api-key', BOLT_LOCAL_API_KEY:key||'local-no-key', BOLT_PERMISSION_MODE:mode, BOLT_LLAMA_TIMINGS:serverTimings?'1':'0', BOLT_AUTO_OUTPUT:autoOutput?'1':'0', BOLT_WEB_URL:webAccess?.url||'', BOLT_WEB_KEY:webAccess?.key||'', BOLT_BROWSER:webAccess?.browser?'1':'0', BOLT_DELEGATE_URL:delegateAccess?.url||'', BOLT_DELEGATE_KEY:delegateAccess?.key||'', BOLT_DELEGATE_WORKERS:delegateAccess?JSON.stringify(delegateAccess.workers):'', BOLT_STABLE_TOOLS:stableTools?'1':'0', BOLT_DECLARED_MODE:declared.mode||'', BOLT_DECLARED_WEB:declared.web?'1':'0', PI_OFFLINE:'1', PI_TELEMETRY:'0'}});
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', chunk => {
       this.buffer += chunk;

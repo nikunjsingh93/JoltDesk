@@ -2,6 +2,28 @@
 
 Updated November 12, 2026 by Claude Code.
 
+## Worker progress and 0.14.8 (November 12, 2026)
+
+Added a live worker panel showing each configured model’s task, prompt-processing progress when provided, thinking/writing/tool/approval state, a short answer preview, and cumulative generated tokens. A tilde marks estimated streaming counts; reported usage replaces estimates at message completion. Worker progress is kept per chat and restored from the runner on reload. The user confirmed general-chat workers worked and requested publication of the combined feature as 0.14.8.
+
+Verification: `npm test` passed 52 tests with one existing skip; `worker-progress-ui-check`, `ui-check`, `changes-ui-check`, `files-web-ui-check`, and `cache-stability-ui-check` passed. The worker UI check covers two mock workers, live tokens and preview, reload recovery, and exact final usage. Its screenshot was inspected. Next: publish the requested 0.14.8 build and verify its GitHub asset digest.
+
+## Question workers (November 12, 2026)
+
+General chats can now delegate independent questions to enabled workers without Git or worktrees. The lead uses `delegate_tasks` with `mode: questions` (the default) and supplies each worker’s task and needed context; workers are tool-free and cannot read files, browse, or delegate. Coding mode retains clean committed Git worktrees and requires Ask/Bypass. The Workers dialog explains both modes. Results are shown in the same review panel. Built `release-build/JoltDesk-0.14.7-win-arm64.zip` (SHA-256 `0cb6ad50466370cccf87eff467f5d135e856896542e6eedfb9ccddaa9f17267a`); the packaged app started with an isolated profile. Version 0.14.7 is a local test build only.
+
+Verification: `npm test` passed 52 tests with one existing skip, including general-chat delegation to two isolated mock servers, no tools or worktrees for question workers, and rejection of coding in Chat-only mode. `ui-check` passed. `cache-stability-ui-check` hit its previously observed model-switch dialog race once and passed on rerun. Next: test against the user’s live models, including whether the lead chooses the right delegation mode.
+
+## Worker controls (November 12, 2026)
+
+Worker model dropdown options now use the main model picker’s theme colors. Each saved worker has an Enabled checkbox; disabling it preserves the selected model but excludes it from delegation, and disabling every worker removes the tool from the lead. Older slots without an enabled field remain enabled. UI and end-to-end tests cover saving/reopening toggles, theme colors, disabled routing, and all-disabled behavior. `npm test` passed 51 tests with one existing skip; `ui-check` passed. Built `release-build/JoltDesk-0.14.6-win-arm64.zip` (SHA-256 `912c62a4fa3a68e315a6980a9b3b564aab41786da62a9f5707c6c5e0478fee22`); the packaged app started with an isolated profile. Version 0.14.6 is a local test build and has not been published.
+
+## Worker delegation test build (November 12, 2026)
+
+Implemented an optional Workers dialog per chat, with up to three saved connection/model slots. The lead can invoke `delegate_tasks` in Ask/Bypass; separate Pi-Bolt processes use those connections and parallel detached Git worktrees. Worker approvals are routed through the parent chat, results and bounded diffs/new-file content are reviewable in the dialog, and nothing is automatically merged or applied. The project must be a clean Git repository with a commit; ignored files are absent. Worktrees are not OS sandboxes, and worker commands retain the chat’s permissions. Results are archived on chat deletion; worktrees are deliberately retained. Version 0.14.5 is a local test build only.
+
+Verification: `npm test` passed 51 tests with one existing skip; `ui-check`, `files-web-ui-check`, `changes-ui-check`, and `cache-stability-ui-check` passed. `test/subagents.test.mjs` uses three isolated mock APIs and real Pi-Bolt to check two workers, separate model connections and worktrees, and serialized Ask approvals; `worker-worktrees.test.mjs` covers concurrent worktrees, dirty-project refusal, new-file review, and cancellation. The Workers dialog screenshot was inspected. Built `release-build/JoltDesk-0.14.5-win-arm64.zip` (SHA-256 `d117757e127bbaa2fae86b91933a6f5a3d2448d463e97333dccbd0e9257697b3`); the packaged app started with an isolated profile. The feature has not been tested against the user’s live model servers. Next: user-test model delegation and review, and consider support for safely carrying dirty project state into worktrees.
+
 ## Browser, prompt actions and timing (November 12, 2026)
 
 The user’s koi chat had Web off; the agent had no browser tools, invoked PowerShell Start-Process and opened the default browser. It edited a same-named workspace file, not the attached original. Browser tools are now offered in file-enabled modes even with Web off, limited to local file pages; external web access still requires Web. Guidance tells the model to use browser tools and the attachment’s exact path. Existing approval/checkpoint rules remain. Copy and Edit controls on user messages copy the prompt or place it in the composer; attachments must be reattached. Reply time now spans the whole turn including tools and approvals, while rate and token count stay per model response. Older saved timings cannot be reconstructed. Version 0.14.4 was published to GitHub after the user tested the browser scenario.

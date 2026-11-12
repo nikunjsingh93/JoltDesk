@@ -12,6 +12,7 @@ import { completedMetrics } from './public/reply-metrics.mjs';
 import {makeRuntime,reduceBackground,collectInspector} from './public/chat-runtime.mjs';
 import { createCheckpoints } from './checkpoints.mjs';
 import { storeAttachment, archiveAttachments } from './attachments.mjs';
+import { delegateTasks } from './subagents.mjs';
 import * as gitOps from './git.mjs';
 import { createTerminals } from './terminal.mjs';
 import { listSkills, projectSkillRoots, createSkill, importSkill, removeSkill } from './skills.mjs';
@@ -83,7 +84,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   });return saveQueue;};
   if(recovered||migratedConnections)await save();
   const token=randomBytes(32).toString('hex'),app=express(),http=createServer(app),wss=new WebSocketServer({noServer:true});
-  const runners=new Map(),subscribers=new Map(),starting=new Map();
+  const runners=new Map(),subscribers=new Map(),starting=new Map(),workerApprovals=new Map();
   const metricsDir=path.join(dataDir,'reply-metrics');await fs.mkdir(metricsDir,{recursive:true});
   const checkpoints=createCheckpoints(path.join(dataDir,'checkpoints'));
   const restoreNotes=new Map();
@@ -219,12 +220,12 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     if(!profile)throw new Error('This chat’s API was removed. Select another API to continue.');
     const skillSet=(await chatSkills(chat)).selected,skillKey=skillSet.join('|');
     const existing=runners.get(chat.id);
-    if(existing&&(existing.busy||(existing.boundConnection.id===profile.id&&existing.profileRevision===(profile.revision||0)&&existing.instructionsRevision===(meta.instructionsRevision||0)&&existing.skillKey===skillKey)))return existing;
+    if(existing&&(existing.busy||(existing.boundConnection.id===profile.id&&existing.profileRevision===(profile.revision||0)&&existing.instructionsRevision===(meta.instructionsRevision||0)&&existing.skillKey===skillKey&&existing.workerKey===JSON.stringify(chat.workerSlots||[]))))return existing;
     if(existing){existing.close();runners.delete(chat.id);}
     if(starting.has(chat.id))return starting.get(chat.id);
     const promise=(async()=>{
       const project=meta.projects.find(p=>p.id===chat.projectId);
-      const cwd=project?.path || path.join(dataDir,'workspace');await fs.mkdir(cwd,{recursive:true});
+      const cwd=chat._cwd||project?.path || path.join(dataDir,'workspace');await fs.mkdir(cwd,{recursive:true});
       const extension=process.env.BOLT_APPROVAL_PATH || path.join(root,'approval.ts');
       const candidate=sessionKeys[credentialId(profile)]||'';
       // Each chat owns its registry and credential environment. Changing the picker
@@ -243,9 +244,12 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
         registry.providers={...registry.providers,[LOCAL_PROVIDER]:definition};
       }
       await fs.writeFile(path.join(isolatedAgentDir,'models.json'),JSON.stringify(registry));const personal=path.join(isolatedAgentDir,'AGENTS.md');if(String(meta.instructions||'').trim())await fs.writeFile(personal,meta.instructions);else await fs.rm(personal,{force:true});await fs.copyFile(path.join(agentDir,'settings.json'),path.join(isolatedAgentDir,'settings.json'));
-      const webAccess=native?.webTools?{url:`http://127.0.0.1:${http.address().port}/internal/chats/${chat.id}/web`,key:randomBytes(32).toString('hex'),browser:!!native.browser}:undefined;
-      const rpc=new Rpc({binary:selectedBinary(),cwd,agentDir:isolatedAgentDir,sessionDir,sessionId:chat.id,key:candidate,mode:chat.mode,extension,serverTimings:profile.provider==='local'&&profile.profile!=='generic',autoOutput:profile.provider==='local'&&profile.maxTokens==='auto',webAccess,skills:skillSet,stableTools:profile.provider==='local',declared:{mode:chat.declaredMode,web:chat.declaredWeb}});
-      rpc.skillKey=skillKey;
+      const webAccess=!chat._worker&&native?.webTools?{url:`http://127.0.0.1:${http.address().port}/internal/chats/${chat.id}/web`,key:randomBytes(32).toString('hex'),browser:!!native.browser}:undefined;
+      const activeWorkers=(chat.workerSlots||[]).map((slot,slotIndex)=>({...slot,slotIndex})).filter(slot=>slot.enabled!==false);
+      const delegateAccess=!chat._worker&&activeWorkers.length?{url:`http://127.0.0.1:${http.address().port}/internal/chats/${chat.id}/delegate`,key:randomBytes(32).toString('hex'),workers:activeWorkers.map(slot=>({number:slot.slotIndex+1,model:slot.model,connection:meta.connections.find(c=>c.id===slot.connectionId)?.name||'Saved connection'}))}:undefined;
+      const workerSessions=chat._worker?path.join(dataDir,'workers','sessions'):sessionDir;if(chat._worker)await fs.mkdir(workerSessions,{recursive:true});
+      const rpc=new Rpc({binary:selectedBinary(),cwd,agentDir:isolatedAgentDir,sessionDir:workerSessions,sessionId:chat.id,key:candidate,mode:chat.mode,extension,serverTimings:profile.provider==='local'&&profile.profile!=='generic',autoOutput:profile.provider==='local'&&profile.maxTokens==='auto',webAccess,skills:skillSet,stableTools:profile.provider==='local',declared:{mode:chat.declaredMode,web:chat.declaredWeb},delegateAccess});
+      rpc.skillKey=skillKey;rpc.workerKey=JSON.stringify(chat.workerSlots||[]);rpc.delegateKey=delegateAccess?.key;
       rpc.webKey=webAccess?.key;
       rpc.webPending=0;
       rpc.boundConnection={...profile};rpc.instructionsRevision=meta.instructionsRevision||0;rpc.models=profileModels;rpc.profileRevision=profile.revision||0;rpc.keySnapshot=candidate;
@@ -302,8 +306,87 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     res.set('X-Content-Type-Options','nosniff');res.set('Referrer-Policy','no-referrer');res.set('Cross-Origin-Resource-Policy','same-origin');
     res.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");next();
   });
+  // Serializes worker approval dialogs while allowing worker execution in parallel.
+  function nextWorkerApproval(parentId){
+    const queue=workerApprovals.get(parentId);if(!queue?.length)return;
+    const entry=queue[0];if(entry.shown)return;entry.shown=true;
+    broadcast(parentId,{...entry.event,id:entry.id,title:'Worker '+(entry.index+1)+': '+(entry.event.title||'Approval')});
+  }
+  async function runDelegatedWorker(parent,slot,task,worktree,index,signal,mode){
+    const coding=mode==='coding';
+    const fake={id:worktree.id,projectId:coding?parent.projectId:null,connectionId:slot.connectionId,model:slot.model,mode:coding?parent.mode:'chat',thinking:'off',_worker:true,_cwd:coding?worktree.path:path.join(dataDir,'workers','question-workspace')};
+    const worker=await runner(fake);let failure=null,finished=false;
+    let completedTokens=0,currentChars=0,estimatedCompleted=false,preview='',lastProgress=0;
+    const progress=(state,extra={},force=false)=>{
+      const now=Date.now();if(!force&&now-lastProgress<250)return;lastProgress=now;
+      broadcast(parent.id,{type:'worker_status',index,state,tokens:completedTokens+Math.ceil(currentChars/4),estimated:estimatedCompleted||currentChars>0,preview,...extra});
+    };
+    const settled=new Promise((resolve,reject)=>{
+      worker.on('event',e=>{
+        if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_REQUEST:')){currentChars=0;progress('processing',{processed:null,total:null},true);}
+        if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_PROGRESS:')){try{const p=JSON.parse(e.message.slice(14));if(p.total>0)progress('processing',{processed:p.processed||0,total:p.total});}catch{}}
+        if(e.type==='message_update'){
+          const a=e.assistantMessageEvent||{};
+          if(['text_delta','thinking_delta','toolcall_delta'].includes(a.type)){currentChars+=String(a.delta||'').length;if(a.type==='text_delta')preview=(preview+String(a.delta||'')).slice(-300);progress(a.type==='thinking_delta'?'thinking':a.type==='toolcall_delta'?'tool arguments':'writing',{processed:null,total:null});}
+        }
+        if(e.type==='message_end'&&e.message?.role==='assistant'){
+          const metrics=e.replyMetrics;const reported=Number(metrics?.output);
+          if(Number.isFinite(reported)&&reported>0){completedTokens+=reported;estimatedCompleted||=!!metrics.estimated;}
+          else if(currentChars){completedTokens+=Math.ceil(currentChars/4);estimatedCompleted=true;}
+          currentChars=0;progress('working',{processed:null,total:null},true);
+          if(e.message.errorMessage)failure=e.message.errorMessage;
+        }
+        if(e.type==='tool_execution_start')progress('tool',{tool:String(e.toolName||'tool'),processed:null,total:null},true);
+        if(e.type==='tool_execution_end')progress('working',{tool:null},true);
+        if(e.type==='extension_ui_request'&&['confirm','select','input','editor'].includes(e.method)){
+          progress('approval',{tool:null},true);
+          const queue=workerApprovals.get(parent.id)||[];queue.push({id:randomUUID(),event:e,worker,index});workerApprovals.set(parent.id,queue);nextWorkerApproval(parent.id);
+        }
+        if(e.type==='agent_settled'){finished=true;resolve();}
+      });
+      worker.on('closed',message=>{if(!finished)reject(new Error(message));});
+    });settled.catch(()=>{});
+    const abort=()=>{if(!worker.closed)worker.command('abort',{},60000).catch(()=>{});};signal?.addEventListener('abort',abort,{once:true});
+    try{
+      if(signal?.aborted)throw new Error('Worker cancelled.');
+      const model=worker.models.find(m=>m.id===slot.model);if(!model)throw new Error('Worker model is no longer available.');
+      await worker.command('set_model',{provider:model.provider,modelId:model.id});
+      const levels=await worker.command('get_available_thinking_levels');if(levels.levels.includes('off'))await worker.command('set_thinking_level',{level:'off'});
+      worker.busy=true;
+      await worker.command('prompt',{message:(coding?'Work independently on this assigned task in your current Git worktree. Do not modify files outside it. Do not commit or merge. Summarize changes and checks.':'Answer this assigned question independently using the supplied information. You have no file, browser, or web tools; state any limits.')+'\n\n'+task});
+      await Promise.race([settled,new Promise((_,reject)=>{if(signal?.aborted)reject(new Error('Worker cancelled.'));else signal?.addEventListener('abort',()=>reject(new Error('Worker cancelled.')),{once:true});})]);
+      if(failure)throw new Error(failure);
+      const result=await worker.command('get_messages');const reply=result.messages.findLast(m=>m.role==='assistant');
+      return (Array.isArray(reply?.content)?reply.content.filter(c=>c.type==='text').map(c=>c.text).join('\n'):String(reply?.content||'')).slice(0,12000);
+    }finally{
+      signal?.removeEventListener('abort',abort);worker.close();runners.delete(fake.id);
+      const queue=workerApprovals.get(parent.id)||[];const wasFirst=queue[0]?.worker===worker;const remaining=queue.filter(x=>x.worker!==worker);workerApprovals.set(parent.id,remaining);if(wasFirst){broadcast(parent.id,{type:'approval_resolved'});nextWorkerApproval(parent.id);}
+    }
+  }
   app.use('/api',(req,res,next)=>req.headers['x-bolt-token']===token?next():res.status(403).json({error:'Unauthorized'}));
   app.use(express.json({limit:'20mb'}));
+  app.post('/internal/chats/:id/delegate',async(req,res)=>{
+    const chat=meta.chats.find(c=>c.id===req.params.id),rpc=runners.get(req.params.id);
+    if(req.headers.origin||!chat||!rpc?.busy||!rpc.delegateKey||req.headers['x-bolt-worker-key']!==rpc.delegateKey)return res.status(403).json({error:'Worker delegation is disabled for this chat.'});
+    const mode=req.body.mode??'questions';
+    if(!['questions','coding'].includes(mode))return res.status(400).json({error:'Choose questions or coding for the worker tasks.'});
+    if(mode==='coding'&&!['ask','bypass'].includes(chat.mode))return res.status(403).json({error:'Coding workers require Ask before changes or Bypass mode.'});
+    if(mode==='coding'&&!chat.projectId)return res.status(400).json({error:'Add this chat to a Git project before using coding workers.'});
+    if(rpc.workersRunning)return res.status(409).json({error:'Worker tasks are already running in this chat.'});
+    rpc.workersRunning=true;
+    const controller=new AbortController();res.once('close',()=>controller.abort());
+    const slots=(chat.workerSlots||[]).map((slot,slotIndex)=>({...slot,slotIndex})).filter(slot=>slot.enabled!==false);
+    broadcast(chat.id,{type:'worker_batch'});
+    try{const result=await delegateTasks({cwd:chatCwd(chat),worktreeRoot:path.join(dataDir,'workers','worktrees'),slots,tasks:req.body.tasks,mode,signal:controller.signal,
+      onStatus:event=>broadcast(chat.id,{type:'worker_status',...event,index:slots[event.index]?.slotIndex??event.index}),runWorker:args=>runDelegatedWorker(chat,args.slot,args.task,args.worktree,args.slot.slotIndex,args.signal,args.mode)});
+    for(const entry of result)entry.index=slots[entry.index].slotIndex;
+    const dir=path.join(dataDir,'workers','results');await fs.mkdir(dir,{recursive:true});
+    const file=path.join(dir,chat.id+'.json');let previous=[];try{previous=JSON.parse(await fs.readFile(file,'utf8'));}catch{}
+    previous.push({at:new Date().toISOString(),results:result});await fs.writeFile(file,JSON.stringify(previous.slice(-30)));
+    broadcast(chat.id,{type:'workers_results'});
+    if(!res.destroyed)res.json({results:result.map(r=>r.changes?{...r,changes:{...r.changes,status:r.changes.status.slice(0,4000),diff:r.changes.diff.slice(0,8000),newFiles:r.changes.newFiles.slice(0,50).map(f=>({path:f.path,note:f.note||'Read this file in the worktree to review it.'})),truncated:r.changes.truncated||r.changes.diff.length>8000||r.changes.status.length>4000||r.changes.newFiles.length>50}}:r),instructions:mode==='coding'?'Review each worktree and report findings. Do not merge or apply changes without the user’s review.':'Compare the workers’ answers and give the user your own assessment.'});
+    }finally{rpc.workersRunning=false;}
+  });
   app.post('/internal/chats/:id/web',async(req,res)=>{
     const chat=meta.chats.find(item=>item.id===req.params.id);
     const rpc=runners.get(req.params.id);
@@ -326,6 +409,10 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     }finally{rpc.webPending--;}
   });
   app.get('/bootstrap.js',(_req,res)=>res.type('js').send(`window.BOLT_TOKEN=${JSON.stringify(token)};`));
+  app.get('/api/chats/:id/workers',async(req,res)=>{
+    const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)return res.status(404).json({error:'Chat not found'});
+    try{res.json(JSON.parse(await fs.readFile(path.join(dataDir,'workers','results',chat.id+'.json'),'utf8')));}catch(e){if(e.code==='ENOENT')res.json([]);else throw e;}
+  });
   app.get('/api/config',(_req,res)=>res.json(config()));
   app.get('/api/connections/status',async(_req,res)=>{await Promise.all(meta.connections.map(checkEndpoint));res.json({statuses:Object.fromEntries(meta.connections.map(c=>[c.id,endpointStatuses.get(c.id)||{state:'saved'}]))});});
   app.post('/api/model',async(req,res)=>{if(!models.some(m=>m.id===req.body.modelId))throw new Error('Choose an available model.');meta.preferredModels={...meta.preferredModels,[credentialId(connection)]:req.body.modelId};await save();res.json({modelId:req.body.modelId});});
@@ -399,6 +486,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)return res.status(404).json({error:'Chat not found'});
     const rpc=starting.has(chat.id)?await starting.get(chat.id):runners.get(chat.id);if(rpc?.busy&&Object.keys(req.body).some(k=>!['mode','title'].includes(k)))throw new Error('Stop the active response before changing model or thinking settings.');
     if(req.body.title!==undefined){req.body.title=String(req.body.title).trim();if(!req.body.title||req.body.title.length>100)return res.status(400).json({error:'Enter a chat name between 1 and 100 characters.'});}
+    if(rpc?.workersRunning&&req.body.mode!==undefined)throw new Error('Wait for the workers to finish or stop the response before changing permissions.');
     if(req.body.mode&&!['chat','read','ask','bypass'].includes(req.body.mode))throw new Error('Invalid permission mode');
     if(req.body.mode&&rpc){
       const wasBusy=rpc.busy;await rpc.command('prompt',{message:`/bolt-permissions ${req.body.mode}${wasBusy?' continue':''}`});
@@ -410,6 +498,11 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     const targetModels=meta.connections.find(c=>c.id===(req.body.connectionId||chat.connectionId))?.models||models;
     if(req.body.model&&targetModels.length&&!targetModels.some(m=>m.id===req.body.model))throw new Error('Choose an available model from this API.');
     for(const k of ['title','model','mode','thinking','connectionId'])if(req.body[k]!==undefined)chat[k]=String(req.body[k]);
+    if(req.body.workerSlots!==undefined){
+      if(!Array.isArray(req.body.workerSlots)||req.body.workerSlots.length>3)throw new Error('Choose up to three workers.');
+      for(const slot of req.body.workerSlots){if(slot?.enabled!==undefined&&typeof slot.enabled!=='boolean')throw new Error('Worker enabled state must be true or false.');const profile=slot&&typeof slot==='object'?meta.connections.find(c=>c.id===slot.connectionId):null;if(!profile?.models?.some(m=>m.id===slot.model))throw new Error('Choose a saved connection and model for each worker.');}
+      chat.workerSlots=req.body.workerSlots.map(slot=>({connectionId:slot.connectionId,model:slot.model,enabled:slot.enabled!==false}));
+    }
     if(req.body.webEnabled!==undefined)chat.webEnabled=!!native?.webTools&&req.body.webEnabled===true;
     await save();res.json(chat);
   });
@@ -430,6 +523,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     await fs.rename(path.join(metricsDir,chat.id+'.json'),path.join(trash,'reply-metrics.json')).catch(e=>{if(e.code!=='ENOENT')throw e;});
     terminals.close(chat.id);
     await checkpoints.remove(chat.id,trash);
+    await fs.rename(path.join(dataDir,'workers','results',chat.id+'.json'),path.join(trash,'worker-results.json')).catch(e=>{if(e.code!=='ENOENT')throw e;});
     await archiveAttachments(chatCwd(chat),chat.id,trash);
     metricCache.delete(chat.id);
   }
@@ -467,7 +561,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
       return res.json({messages:await savedMessages(chat.id),stats:{},state:null,busy:false,sequence:0,live:null,approval:null,replyMetrics:await replyMetrics(chat.id),offline:{kind:'engine',api:profile?.name||'This chat’s API',message:error.message}});
     }const [messages,stats,state]=await Promise.all([rpc.command('get_messages'),rpc.command('get_session_stats'),rpc.command('get_state')]);
     const metrics=await replyMetrics(chat.id),live=rpc.viewState?.streaming;
-    res.json({messages:messages.messages,stats,state,busy:rpc.busy,sequence:rpc.eventSeq,live:live?{...live,elapsedMs:performance.now()-live.startedAt,turnElapsedMs:rpc.turnStarted==null?null:performance.now()-rpc.turnStarted,firstDeltaMs:rpc.firstDelta,thinkingDurationMs:rpc.thinkingMs+(rpc.thinkingStart!==null?performance.now()-rpc.thinkingStart:0)}:null,approval:rpc.viewState?.approval,capabilities:rpc.capabilities,replyMetrics:metrics});
+    res.json({messages:messages.messages,stats,state,busy:rpc.busy,sequence:rpc.eventSeq,live:live?{...live,elapsedMs:performance.now()-live.startedAt,turnElapsedMs:rpc.turnStarted==null?null:performance.now()-rpc.turnStarted,firstDeltaMs:rpc.firstDelta,thinkingDurationMs:rpc.thinkingMs+(rpc.thinkingStart!==null?performance.now()-rpc.thinkingStart:0)}:null,approval:rpc.viewState?.approval,workerProgress:rpc.viewState?.workerProgress||{},capabilities:rpc.capabilities,replyMetrics:metrics});
   });
   const checkpointChat=req=>{const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)throw new Error('Chat not found');return chat;};
   app.get('/api/chats/:id/checkpoints',async(req,res)=>{checkpointChat(req);res.json({turns:await checkpoints.list(req.params.id)});});
@@ -750,7 +844,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
           if(chat.title==='New conversation'){chat.title=String(msg.message||'Attached files').slice(0,55);await save();broadcast(id,{type:'chat_updated',chat});}
         }catch(e){rpc.busy=false;finishTurn(id,rpc);throw e;}
       }else if(msg.type==='abort'){await rpc.command('clear_queue');await rpc.command('abort',{},60000);}
-      else if(msg.type==='ui_response'){rpc.send({type:'extension_ui_response',id:msg.id,confirmed:msg.confirmed,value:msg.value,cancelled:msg.cancelled});rpc.pendingApproval=null;broadcast(id,{type:'approval_resolved'});}
+      else if(msg.type==='ui_response'){const queue=workerApprovals.get(id),entry=queue?.[0];if(entry&&entry.id===msg.id){queue.shift();entry.worker.send({type:'extension_ui_response',id:entry.event.id,confirmed:msg.confirmed,value:msg.value,cancelled:msg.cancelled});broadcast(id,{type:'approval_resolved'});nextWorkerApproval(id);}else{rpc.send({type:'extension_ui_response',id:msg.id,confirmed:msg.confirmed,value:msg.value,cancelled:msg.cancelled});rpc.pendingApproval=null;broadcast(id,{type:'approval_resolved'});}}
       else if(msg.type==='levels'){
         if(rpc.busy)return;
         const selected=rpc.models.find(m=>m.id===chat.model);if(selected)await rpc.command('set_model',{provider:selected.provider,modelId:chat.model});

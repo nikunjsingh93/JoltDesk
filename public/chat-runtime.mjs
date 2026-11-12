@@ -1,4 +1,4 @@
-export function makeRuntime(chat){return {chat,messages:[],streaming:null,running:false,started:0,chars:0,usage:{},stats:{},finalSeconds:0,stage:'Working…',inspector:{files:{},tools:{}},approval:null,files:[],draft:'',followChat:true};}
+export function makeRuntime(chat){return {chat,messages:[],streaming:null,running:false,started:0,chars:0,usage:{},stats:{},finalSeconds:0,stage:'Working…',inspector:{files:{},tools:{}},workerProgress:{},approval:null,files:[],draft:'',followChat:true};}
 export function trackTool(state,event){
   const info=state.inspector||(state.inspector={files:{},tools:{}});
   if(event.type==='tool_execution_start'){
@@ -11,6 +11,8 @@ export function updateThinking(message,timing,now){if(!message||timing?.thinking
 export function reduceBackground(s,e,now=performance.now()){
   trackTool(s,e);
   if(e.type==='agent_start'){s.running=true;s.started=now;}
+  if(e.type==='worker_batch')s.workerProgress={};
+  if(e.type==='worker_status'){s.workerProgress||={};s.workerProgress[e.index]={...(s.workerProgress[e.index]||{}),...e};s.stage='Worker '+(e.index+1)+' · '+e.state;}
   if(e.type==='model_loading'&&!s.chars)s.stage=e.loading?'Loading model…':'Processing request · awaiting streamed tokens…';
   if(e.type==='prompt_progress'&&e.total>0)s.stage=`Processing prompt · ${Math.floor(100*Math.min(e.total,Number(e.processed||0))/e.total)}%`;
   if(e.type==='generation_start'){s.streaming={role:'assistant',content:[],model:e.model,live:true,placeholder:true,startedAt:now-(e.elapsedMs||0),turnStartedAt:now-(e.turnElapsedMs||0)};s.messages.push(s.streaming);s.stage='Processing request…';s.usage={};s.chars=0;}

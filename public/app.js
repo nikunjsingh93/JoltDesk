@@ -12,9 +12,9 @@ const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=
 let config, current, projectId=null, ws, files=[], messages=[], streaming=null, running=false, started=0, chars=0, usage={}, stats={}, approval, generation=0, finalSeconds=0,followChat=true;
 const toolNodes=new Map();
 const chatStates=new Map();
-let promptTotal=0;
+let promptTotal=0,workerProgress={};
 let changesPanel=null,gitPanel=null,instructionsPanel=null,terminalPanel=null,skillsPanel=null;
-function saveCurrentState(){if(!current)return;const s=chatStates.get(current.id);if(!s)return;Object.assign(s,{chat:current,messages,streaming,running,started,chars,usage,stats,finalSeconds,ws,files,draft:$('#prompt').value,followChat,stage:$('#activity-text').textContent,approval});}
+function saveCurrentState(){if(!current)return;const s=chatStates.get(current.id);if(!s)return;Object.assign(s,{chat:current,messages,streaming,running,started,chars,usage,stats,finalSeconds,ws,files,workerProgress,draft:$('#prompt').value,followChat,stage:$('#activity-text').textContent,approval});}
 function parkActivity(){const activity=$('#activity');if(activity)$('#activity-parking').append(activity);}
 function mountActivity(message){
   const activity=$('#activity');
@@ -50,7 +50,7 @@ function renderSidebar(){
     return `<section class="project-tree" data-project-id="${p.id}"><div class="project-heading ${projectId===p.id?'selected':''}"><button class="project-toggle" data-id="${p.id}" aria-label="${expanded?'Collapse':'Expand'} ${esc(p.name)}" aria-expanded="${expanded}" aria-controls="project-chats-${p.id}">${expanded?'⌄':'›'}</button><button class="open-project" data-id="${p.id}" title="${esc(p.path)}">▱ <span>${esc(p.name)}</span></button><button class="project-new-chat" data-id="${p.id}" aria-label="New chat in ${esc(p.name)}" title="New chat in this project">＋</button><button class="project-actions" data-id="${p.id}" aria-label="Project options: ${esc(p.name)}" aria-haspopup="menu" aria-controls="project-menu" aria-expanded="false" title="Project options">⋯</button></div><div id="project-chats-${p.id}" class="project-chats" role="group" aria-label="Chats in ${esc(p.name)}" ${expanded?'':'hidden'}>${chats.map(chatRow).join('')||'<div class="empty-project">No chats yet</div>'}</div></section>`;
   }).join('')||(!config.projects.length?'<div class="empty-side">Add a project to group chats.</div>':'');
   $('#projects').querySelectorAll('.project-toggle').forEach(b=>b.onclick=()=>{projectExpansion[b.dataset.id]=b.getAttribute('aria-expanded')!=='true';saveProjectExpansion();renderSidebar();});
-  $('#projects').querySelectorAll('.open-project').forEach(b=>b.onclick=()=>{saveCurrentState();generation++;projectId=b.dataset.id;projectExpansion[projectId]=true;saveProjectExpansion();current=null;messages=[];streaming=null;stats={};ws=null;running=false;approval=null;$('#approval-dialog').close();renderSidebar();renderChat();setRunning(false);});
+  $('#projects').querySelectorAll('.open-project').forEach(b=>b.onclick=()=>{saveCurrentState();generation++;projectId=b.dataset.id;projectExpansion[projectId]=true;saveProjectExpansion();current=null;messages=[];streaming=null;stats={};workerProgress={};ws=null;running=false;approval=null;$('#approval-dialog').close();renderSidebar();renderChat();setRunning(false);});
   $('#projects').querySelectorAll('.project-new-chat').forEach(b=>b.onclick=()=>newChat(b.dataset.id));
   $('#projects').querySelectorAll('.project-actions').forEach(b=>b.onclick=()=>{
     const menu=$('#project-menu');if(menu.matches(':popover-open')&&editingProjectId===b.dataset.id){menu.hidePopover();return;}
@@ -351,11 +351,32 @@ function paintReplyMetrics(m,el){
   row.querySelector('[data-stat="cost"]').textContent=metric.costText;
   row.classList.toggle('live',!!m.live);
 }
+function renderWorkerProgress(){
+  let panel=$('#worker-progress');const workers=Object.values(workerProgress).sort((a,b)=>a.index-b.index);
+  if(!workers.length){panel?.remove();return;}
+  if(!panel){panel=document.createElement('section');panel.id='worker-progress';panel.className='worker-progress';panel.setAttribute('aria-label','Worker progress');$('#messages').append(panel);}
+  const heading=document.createElement('strong');heading.textContent='Workers';panel.replaceChildren(heading);
+  const labels={preparing:'Preparing',running:'Starting',processing:'Processing prompt',thinking:'Thinking',writing:'Writing',working:'Working',tool:'Running tool',approval:'Waiting for approval',done:'Finished',error:'Failed','tool arguments':'Preparing tool'};
+  for(const worker of workers){
+    const row=document.createElement('div');row.className='worker-progress-row';row.dataset.worker=worker.index;
+    const title=document.createElement('div');title.className='worker-progress-title';title.textContent='Worker '+(worker.index+1)+(worker.model?' · '+worker.model:'');
+    const state=document.createElement('div');state.className='worker-progress-state';let label=labels[worker.state]||worker.state||'Working';
+    if(worker.state==='tool'&&worker.tool)label+=' · '+worker.tool;
+    if(worker.state==='processing'&&Number(worker.total)>0)label+=' · '+Math.floor(100*Math.min(worker.total,Number(worker.processed)||0)/worker.total)+'%';
+    if(Number(worker.tokens)>0)label+=' · '+(worker.estimated?'~':'')+Number(worker.tokens).toLocaleString()+' tokens';
+    state.textContent=label;state.title=worker.estimated?'Token count is estimated while the worker is streaming.':'Token count reported by the model when available.';const task=document.createElement('div');task.className='worker-progress-task';task.textContent=worker.task||'';
+    row.append(title,state,task);
+    if(worker.preview){const preview=document.createElement('div');preview.className='worker-progress-preview';preview.textContent=worker.preview;row.append(preview);}
+    if(worker.state==='error'&&worker.message){const error=document.createElement('div');error.className='worker-progress-error';error.textContent=worker.message;row.append(error);}
+    panel.append(row);
+  }
+}
 function renderChat(){
   parkActivity();$('#welcome').classList.toggle('hidden',messages.length>0);$('#messages').replaceChildren();toolNodes.clear();
   for(const m of messages){if(['user','assistant'].includes(m.role)){m.el=messageNode(m);$('#messages').append(m.el);}else if(m.role==='toolResult'){
     const d=document.createElement('details');d.className='tool';d.innerHTML=`<summary>↳ ${esc(m.toolName||'Tool result')}</summary><pre>${esc((m.content||[]).map(c=>c.text||'').join('\n'))}</pre>`;showToolImages(d,m.content);$('#messages').append(d);
   }}
+  renderWorkerProgress();
   $('#chat-title').textContent=current?.title||'New conversation';$('#permission').value=current?.mode||'chat';$('#permission').classList.toggle('bypass',current?.mode==='bypass');
   $('#web-tools').checked=!!current?.webEnabled;
   $('#file-menu').hidePopover();
@@ -364,7 +385,7 @@ function renderChat(){
 }
 function scrollBottom(){const area=$('#scroll-area');if(followChat)area.scrollTop=area.scrollHeight;}
 $('#scroll-area').addEventListener('scroll',e=>{followChat=atScrollEnd(e.currentTarget);});
-function setRunning(value,save=true){if(running&&!value)finalSeconds=(performance.now()-started)/1000;const changed=running!==value;running=value;$('#activity').classList.toggle('hidden',!value);$('#send').textContent=value?'■':'↑';$('#send').classList.toggle('running',value);$('#send').title=value?'Stop this reply':'Send message';$('#model').disabled=value;$('#thinking').disabled=value;$('#web-tools').disabled=value;$('#status').textContent=value?'Working':'Ready';if(value&&changed){started=performance.now();chars=0;usage={};finalSeconds=0;$('#activity-text').textContent='Waiting for model…';}if(streaming)mountActivity(streaming);updateMetrics();if(save)saveCurrentState();}
+function setRunning(value,save=true){if(running&&!value)finalSeconds=(performance.now()-started)/1000;const changed=running!==value;running=value;$('#activity').classList.toggle('hidden',!value);$('#send').textContent=value?'■':'↑';$('#send').classList.toggle('running',value);$('#send').title=value?'Stop this reply':'Send message';$('#model').disabled=value;$('#thinking').disabled=value;$('#web-tools').disabled=value;$('#workers-button').disabled=value;$('#status').textContent=value?'Working':'Ready';if(value&&changed){started=performance.now();chars=0;usage={};finalSeconds=0;$('#activity-text').textContent='Waiting for model…';}if(streaming)mountActivity(streaming);updateMetrics();if(save)saveCurrentState();}
 function updateMetrics(){
   $('#activity').classList.toggle('hidden',!running||!!(streaming?.isThinking&&streaming.el?.querySelector('.thinking-box')));
   const seconds=running?(performance.now()-started)/1000:finalSeconds,estimated=!usage.output&&running,output=usage.output|| (running?Math.ceil(chars/4):stats.tokens?.output||0);
@@ -388,7 +409,7 @@ function updateMetrics(){
 setInterval(()=>{if(running)updateMetrics();},200);
 async function newChat(targetProjectId=projectId){try{saveCurrentState();const chat=await api('/chats',{projectId:targetProjectId,model:$('#model').value,webEnabled:!current&&$('#web-tools').checked});config.chats.unshift(chat);await openChat(chat);}catch(e){toast(e.message);}}
 async function openChat(chat){
-  saveCurrentState();const seq=++generation;current=chat;projectId=chat.projectId||null;if(projectId){projectExpansion[projectId]=true;saveProjectExpansion();}messages=[];streaming=null;stats={};running=false;ws=null;approval=null;$('#approval-dialog').close();$('#prompt').value='';files=[];renderFiles();renderSidebar();renderChat();setRunning(false,false);
+  saveCurrentState();const seq=++generation;current=chat;projectId=chat.projectId||null;if(projectId){projectExpansion[projectId]=true;saveProjectExpansion();}messages=[];streaming=null;stats={};workerProgress={};running=false;ws=null;approval=null;$('#approval-dialog').close();$('#prompt').value='';files=[];renderFiles();renderSidebar();renderChat();setRunning(false,false);
   try{
     // A chat still opens when its API is offline, so it can be read or moved to a working API.
     let offline=null;
@@ -400,7 +421,7 @@ async function openChat(chat){
     socket.onopen=()=>{socket.send(JSON.stringify({type:'levels'}));if(current?.id===chat.id&&!s.loading)$('#status').textContent='Pi-Bolt connected';};
     socket.onclose=()=>{s.running=false;if(current?.id===chat.id){setRunning(false);$('#status').textContent='Connection closed · reopen chat to reconnect';}renderSidebar();};
     await new Promise((resolve,reject)=>{if(socket.readyState===1)resolve();else{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',()=>reject(new Error('Could not connect to this chat.')),{once:true});}});
-    const history=await api(`/chats/${chat.id}/history`);s.messages=history.messages.map(m=>({...m,replyMetrics:history.replyMetrics?.[m.timestamp]}));s.stats=history.stats;s.running=!!(history.busy||history.state?.isStreaming);s.approval=history.approval;
+    const history=await api(`/chats/${chat.id}/history`);s.messages=history.messages.map(m=>({...m,replyMetrics:history.replyMetrics?.[m.timestamp]}));s.stats=history.stats;s.workerProgress=history.workerProgress||{};s.running=!!(history.busy||history.state?.isStreaming);s.approval=history.approval;
     if(history.live){s.streaming={...history.live,startedAt:performance.now()-history.live.elapsedMs,turnStartedAt:performance.now()-(history.live.turnElapsedMs??history.live.elapsedMs),thinkingTickAt:performance.now()};if(history.live.firstDeltaMs!=null)s.streaming.generationStartedAt=s.streaming.startedAt+history.live.firstDeltaMs;const i=s.messages.findIndex(m=>m.role==='assistant'&&m.timestamp===s.streaming.timestamp);if(i>=0)s.messages[i]=s.streaming;else s.messages.push(s.streaming);s.stage=s.streaming.isThinking?'Thinking…':'Writing a response…';}
     s.offline=offline||history.offline||null;
     s.started=s.streaming?.turnStartedAt??performance.now();s.loaded=true;s.loading=false;for(const e of s.queue)if(e.seq==null||e.seq>history.sequence)reduceBackground(s,e);s.queue=[];s.resolveReady();
@@ -412,7 +433,7 @@ function showOffline(info){
   else if(info.kind==='removed'){toast('This chat’s API was removed. You can read this chat. Pick a model to continue.');$('#status').textContent='API removed';}
   else{toast(`This chat could not start: ${info.message} Showing the saved conversation. Pick a model to continue.`);$('#status').textContent='Read-only';}
 }
-function restoreChatState(s){promptTotal=0;current=s.chat;messages=s.messages;streaming=s.streaming;running=s.running;started=s.started;chars=s.chars;usage=s.usage;stats=s.stats;finalSeconds=s.finalSeconds;ws=s.ws;files=s.files;followChat=s.followChat;approval=s.approval;$('#prompt').value=s.draft||'';$('#activity-text').textContent=s.stage;renderFiles();renderSidebar();renderChat();setRunning(s.running);$('#activity-text').textContent=s.stage;$('#status').textContent=s.running?(s.stage?.startsWith('Thinking')?'Generating':s.stage):'Pi-Bolt connected';if(approval)showApproval(approval);scrollBottom();document.body.classList.remove('sidebar-open');}
+function restoreChatState(s){promptTotal=0;workerProgress=s.workerProgress||{};current=s.chat;renderWorkerButton();messages=s.messages;streaming=s.streaming;running=s.running;started=s.started;chars=s.chars;usage=s.usage;stats=s.stats;finalSeconds=s.finalSeconds;ws=s.ws;files=s.files;followChat=s.followChat;approval=s.approval;$('#prompt').value=s.draft||'';$('#activity-text').textContent=s.stage;renderFiles();renderSidebar();renderChat();setRunning(s.running);$('#activity-text').textContent=s.stage;$('#status').textContent=s.running?(s.stage?.startsWith('Thinking')?'Generating':s.stage):'Pi-Bolt connected';if(approval)showApproval(approval);scrollBottom();document.body.classList.remove('sidebar-open');}
 function deliverChatEvent(s,e){
   if(e.type==='config_changed'){api('/config').then(next=>{config=next;renderModels();updateMetrics();}).catch(()=>{});return;}
   if(e.type==='chat_updated'){const c=config.chats.find(c=>c.id===s.chat.id);if(c)Object.assign(c,e.chat);}
@@ -434,6 +455,8 @@ function updateStreamNode(m){
 }
 function renderStream(){if(renderScheduled)return;renderScheduled=true;setTimeout(()=>{renderScheduled=false;if(streaming?.el)updateStreamNode(streaming);},55);}
 function onEvent(e){
+  if(e.type==='worker_batch'){workerProgress={};renderWorkerProgress();}
+  if(e.type==='worker_status'){workerProgress[e.index]={...(workerProgress[e.index]||{}),...e};renderWorkerProgress();scrollBottom();}
   if(e.type==='generation_timing'&&streaming){streaming.serverTimings=e.timings;paintReplyMetrics(streaming,streaming.el);}
   if(e.type==='model_loading'&&running&&!chars){$('#activity-text').textContent=e.loading?'Loading model…':'Processing request · awaiting streamed tokens…';$('#status').textContent=e.loading?'Loading model':'Processing';}
   if(e.type==='prompt_progress'&&e.total>0){promptTotal=Number(e.total);updateMetrics();}
@@ -523,6 +546,35 @@ async function send(){
   }catch(e){toast(e.message);}
 }
 async function patchChat(data){if(!current)return;const chat=current,updated=await api(`/chats/${chat.id}`,data,'PATCH');Object.assign(chat,updated);const listed=config.chats.find(c=>c.id===chat.id);if(listed)Object.assign(listed,updated);}
+function renderWorkerButton(){const count=(current?.workerSlots||[]).filter(slot=>slot.enabled!==false).length;$('#workers-button').textContent=count?'Workers · '+count:'Workers';$('#workers-button').disabled=running;}
+$('#workers-button').onclick=async()=>{
+  if(!current){await newChat();if(!current)return;}
+  const container=$('#worker-selects');container.replaceChildren();
+  const options=(config.connections||[]).flatMap(c=>(c.models||[]).map(m=>({connectionId:c.id,model:m.id,label:c.name+' · '+(m.name||m.id)})));
+  for(let i=0;i<3;i++){
+    const row=document.createElement('div');row.className='worker-slot';
+    const label=document.createElement('label');label.textContent='Worker '+(i+1);const select=document.createElement('select');select.setAttribute('aria-label','Worker '+(i+1)+' model');select.innerHTML='<option value="">Choose a model</option>';
+    for(const item of options){const option=document.createElement('option');option.value=JSON.stringify({connectionId:item.connectionId,model:item.model});option.textContent=item.label;select.append(option);}
+    const saved=current.workerSlots?.[i];if(saved){const value=JSON.stringify({connectionId:saved.connectionId,model:saved.model});if(![...select.options].some(option=>option.value===value)){const missing=document.createElement('option');missing.value=value;missing.textContent=saved.model+' · connection unavailable';select.append(missing);}select.value=value;}
+    const toggle=document.createElement('label');toggle.className='checkbox worker-enabled';const check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Enable worker '+(i+1));check.checked=!!saved&&saved.enabled!==false;check.disabled=!select.value;
+    select.onchange=()=>{check.disabled=!select.value;check.checked=!!select.value;};
+    toggle.append(check,document.createTextNode('Enabled'));label.append(select);row.append(label,toggle);container.append(row);
+  }
+  const reports=$('#worker-results');reports.replaceChildren();
+  try{
+    const batches=await api('/chats/'+current.id+'/workers');
+    if(!batches.length)reports.textContent='No worker tasks yet.';
+    for(const batch of batches.slice().reverse())for(const result of batch.results){
+      const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
+      summary.textContent='Worker '+(result.index+1)+' · '+(result.error?'Failed':'Finished')+' · '+result.task;
+      pre.textContent=[result.error||result.answer||'',result.worktree?'Worktree: '+result.worktree:'',result.changes?.status?'Changed files:\n'+result.changes.status:'',result.changes?.diff?'Diff:\n'+result.changes.diff:'',...(result.changes?.newFiles||[]).map(f=>'New file: '+f.path+'\n'+(f.content??f.note??'')),result.changes?.truncated?'Diff or file list truncated; inspect the worktree for the full result.':''].filter(Boolean).join('\n\n');
+      details.append(summary,pre);reports.append(details);
+    }
+  }catch(e){reports.textContent=e.message;}
+  $('#workers-dialog').showModal();
+};
+$('#workers-cancel').onclick=()=>$('#workers-dialog').close();
+$('#workers-save').onclick=async()=>{try{const workerSlots=[...$('#worker-selects').querySelectorAll('.worker-slot')].map(row=>{const value=row.querySelector('select').value;return value?{...JSON.parse(value),enabled:row.querySelector('input').checked}:null;}).filter(Boolean);await patchChat({workerSlots});renderWorkerButton();$('#workers-dialog').close();}catch(e){toast(e.message);}};
 $('#send').onclick=send;$('#prompt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}};
 $('#new-chat').onclick=$('#add-conversation').onclick=()=>newChat(null);$('#search').oninput=renderSidebar;
 $('#settings').onclick=$('#welcome-connect').onclick=()=>{$('#settings-dialog').showModal();refreshEngine();};
@@ -555,7 +607,7 @@ $('#confirm-remove-project').onclick=async()=>{
     for(const chatId of result.chats){chatStates.get(chatId)?.ws?.close();chatStates.delete(chatId);}
     delete projectExpansion[id];saveProjectExpansion();
     if(projectId===id)projectId=null;
-    if(current&&result.chats.includes(current.id)){generation++;ws=null;current=null;messages=[];streaming=null;stats={};setRunning(false);renderChat();updateMetrics();}
+    if(current&&result.chats.includes(current.id)){generation++;ws=null;current=null;messages=[];streaming=null;stats={};workerProgress={};setRunning(false);renderChat();updateMetrics();}
     renderSidebar();$('#remove-project-dialog').close();toast('Project removed. Its folder was not changed.');
   }catch(e){$('#remove-project-feedback').textContent=e.message;}
   finally{button.disabled=false;}
@@ -568,7 +620,7 @@ $('#rename-chat').onclick=()=>{closeChatMenu();const chat=config.chats.find(c=>c
 $('#rename-chat-form').onsubmit=async e=>{e.preventDefault();try{const chat=await api(`/chats/${editingChatId}`,{title:$('#rename-chat-title').value},'PATCH');Object.assign(config.chats.find(c=>c.id===chat.id),chat);if(current?.id===chat.id){Object.assign(current,chat);$('#chat-title').textContent=chat.title;}renderSidebar();$('#chat-actions-dialog').close();}catch(e){$('#chat-actions-feedback').textContent=e.message;}};
 $('#delete-chat').onclick=()=>{closeChatMenu();const chat=config.chats.find(c=>c.id===editingChatId);if(!chat)return;$('#delete-chat-name').textContent=chat.title;$('#delete-chat-feedback').textContent='';$('#delete-chat-dialog').showModal();$('#cancel-delete-chat').focus();};
 $('#cancel-delete-chat').onclick=()=>$('#delete-chat-dialog').close();
-$('#confirm-delete-chat').onclick=async()=>{const id=editingChatId;$('#confirm-delete-chat').disabled=true;try{await api(`/chats/${id}`,{},'DELETE');config.chats=config.chats.filter(c=>c.id!==id);chatStates.get(id)?.ws?.close();chatStates.delete(id);if(current?.id===id){generation++;ws=null;current=null;messages=[];streaming=null;stats={};setRunning(false);renderChat();updateMetrics();}renderSidebar();$('#delete-chat-dialog').close();toast('Chat deleted.');}catch(e){$('#delete-chat-feedback').textContent=e.message;}finally{$('#confirm-delete-chat').disabled=false;}};
+$('#confirm-delete-chat').onclick=async()=>{const id=editingChatId;$('#confirm-delete-chat').disabled=true;try{await api(`/chats/${id}`,{},'DELETE');config.chats=config.chats.filter(c=>c.id!==id);chatStates.get(id)?.ws?.close();chatStates.delete(id);if(current?.id===id){generation++;ws=null;current=null;messages=[];streaming=null;stats={};workerProgress={};setRunning(false);renderChat();updateMetrics();}renderSidebar();$('#delete-chat-dialog').close();toast('Chat deleted.');}catch(e){$('#delete-chat-feedback').textContent=e.message;}finally{$('#confirm-delete-chat').disabled=false;}};
 $('#connect-form').onsubmit=async e=>{e.preventDefault();const form=readConnectionForm(),saving=e.submitter?.id==='save-connection';$('#connect-button').disabled=true;$('#save-connection').disabled=true;$('#settings-feedback').textContent=saving?'Saving API settings…':'Connecting to your API and discovering models…';try{
   if(saving){if(!form.id)throw new Error('Connect and save this new API first.');config=await api(`/connections/${form.id}/settings`,form);connectionDrafts.delete(form.id);editingConnectionId=form.id;renderModels();$('#settings-feedback').textContent=`Saved changes. Max output: ${form.maxTokens==='auto'?'Auto':Number(form.maxTokens).toLocaleString()+' tokens'}.`;toast('API changes saved.');return;}
   if(running)await newChat(null);
