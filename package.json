@@ -18,7 +18,9 @@
     "prestart": "node ensure-engine.mjs",
     "preweb": "node ensure-engine.mjs",
     "installer": "electron-builder --win nsis",
-    "preinstaller": "node verify-bundle.mjs"
+    "preinstaller": "node verify-bundle.mjs",
+    "zip": "electron-builder --win zip",
+    "prezip": "node verify-bundle.mjs"
   },
   "dependencies": {
     "dompurify": "^3.2.7",

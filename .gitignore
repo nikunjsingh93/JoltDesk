@@ -12,3 +12,4 @@ Local State
 workspace.json
 diagnostics*.jsonl
 release-build/
+release-dist/
