@@ -87,3 +87,6 @@
 .slash-item.active,.slash-item:hover{background:var(--panel2)}
 .slash-item code{font-size:12px;color:var(--accent);white-space:nowrap}
 .slash-item small{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Version next to the sidebar title. */
+.app-version{align-self:flex-end;margin:0 0 6px -3px;font-size:10px;font-weight:500;letter-spacing:0;color:var(--muted)}
+.sidebar-hidden .app-version{display:none}

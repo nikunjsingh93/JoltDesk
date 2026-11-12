@@ -401,6 +401,11 @@ function updateStreamNode(m){
 function renderStream(){if(renderScheduled)return;renderScheduled=true;setTimeout(()=>{renderScheduled=false;if(streaming?.el)updateStreamNode(streaming);},55);}
 function onEvent(e){
   if(e.type==='generation_timing'&&streaming){streaming.serverTimings=e.timings;paintReplyMetrics(streaming,streaming.el);}
+  if(e.type==='prompt_progress'&&running&&!chars&&e.total>0){
+    const done=Math.min(e.total,Number(e.processed||0)),percent=Math.floor(100*done/e.total);
+    $('#activity-text').textContent=`Processing prompt · ${percent}% (${done.toLocaleString()} / ${Number(e.total).toLocaleString()} tokens${e.cache?`, ${Number(e.cache).toLocaleString()} cached`:''})`;
+    $('#status').textContent=`Processing ${percent}%`;
+  }
   if(e.type==='generation_start'){
     streaming={role:'assistant',content:[],model:e.model||$('#model').value,live:true,placeholder:true,startedAt:performance.now()-(e.elapsedMs||0)};chars=0;usage={};messages.push(streaming);streaming.el=messageNode(streaming);$('#messages').append(streaming.el);$('#activity-text').textContent='Processing request · awaiting streamed tokens…';$('#status').textContent='Processing';scrollBottom();
     mountActivity(streaming);$('#activity').classList.remove('hidden');
@@ -685,4 +690,4 @@ document.addEventListener('click',e=>{
 });
 // Startup buttons stay disabled until their handlers are attached and the workspace has loaded.
 try{config=await api('/config');renderSidebar();renderChat();updateMetrics();}catch(e){toast(e.message);}
-finally{document.querySelectorAll('[data-startup]').forEach(button=>button.disabled=false);}
+finally{document.querySelectorAll('[data-startup]').forEach(button=>button.disabled=false);if(config?.version){$('#app-version').textContent='v'+config.version;$('#app-version').title='JoltDesk '+config.version;}}

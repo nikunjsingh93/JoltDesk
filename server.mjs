@@ -16,6 +16,7 @@ import { createTerminals } from './terminal.mjs';
 import { listSkills, projectSkillRoots, createSkill, importSkill, removeSkill } from './skills.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
+const appVersion=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8')).version;
 export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),vault,native,engineDir,requireBundled=false,autoStartUpdates=true,updateFetcher}={}) {
   await fs.mkdir(dataDir,{recursive:true});
   const agentDir=path.join(dataDir,'agent'),sessionDir=path.join(dataDir,'sessions');
@@ -87,6 +88,24 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   // Unsloth Studio reports the loaded model's real context at /v1/status. A reply or a
   // freshly started chat proves which model is loaded, so check again then and keep
   // the confirmed value. The chat's engine restarts with it before its next message.
+  // While a request waits for its first token, poll Unsloth's status so the real
+  // context limit appears during prompt processing rather than after the reply.
+  function watchStudioContext(chat,rpc){
+    const profile=meta.connections.find(c=>c.id===rpc.boundConnection?.id);
+    const model=(profile?.models||[]).find(m=>m.id===chat.model);
+    if(!profile||profile.provider!=='local'||profile.contextWindow||!model||model.studio===false||rpc.studioWatch)return;
+    if(model.contextWindowEstimated===false&&model.input)return;
+    const started=Date.now();
+    const tick=async()=>{
+      rpc.studioWatch=null;
+      if(!rpc.busy||rpc.firstDelta!==null||Date.now()-started>600000)return;
+      await refreshStudioContext(chat,rpc).catch(()=>{});
+      const current=(meta.connections.find(c=>c.id===profile.id)?.models||[]).find(m=>m.id===chat.model);
+      if(current&&current.contextWindowEstimated===false)return;
+      rpc.studioWatch=setTimeout(tick,3000);
+    };
+    rpc.studioWatch=setTimeout(tick,1500);
+  }
   async function refreshStudioContext(chat,rpc){
     const profile=meta.connections.find(c=>c.id===rpc.boundConnection?.id);
     if(!profile||profile.provider!=='local'||profile.contextWindow)return;
@@ -123,7 +142,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   const audit=(event)=>{auditQueue=auditQueue.then(async()=>{const file=path.join(dataDir,'diagnostics.jsonl');try{if((await fs.stat(file)).size>2000000)await fs.rename(file,path.join(dataDir,'diagnostics.previous.jsonl'));}catch{}await fs.appendFile(file,JSON.stringify({at:new Date().toISOString(),...event})+'\n');}).catch(()=>{});};
   const broadcast=(id,event)=>{const rpc=runners.get(id);if(rpc){event.seq=++rpc.eventSeq;if(rpc.viewState)reduceBackground(rpc.viewState,event);}for(const ws of subscribers.get(id)||[]) if(ws.readyState===1)ws.send(JSON.stringify(event));};
   const endpointStatuses=new Map(),endpointChecks=new Map();
-  const config=()=>({instructions:meta.instructions||'',connected,connection,connections:meta.connections.map(c=>({...c,status:endpointStatuses.get(c.id)||{state:'saved'},hasSavedKey:!!secrets[credentialId(c)],hasSessionKey:!!sessionKeys[credentialId(c)]})),runningChats:[...runners].filter(([,r])=>r.busy).map(([id])=>id),connectionError,connectionNote,preferredModel:meta.preferredModels?.[credentialId(connection)]||null,hasSavedKey:!!secrets[credentialId(connection)],secureStorage:!!vault,models,projects:meta.projects,chats:meta.chats,binary:selectedBinary(),native:!!native,webAvailable:!!native?.webTools,browserAvailable:!!native?.browser,engine:engine?.status()||null,customEngine:!!meta.binary});
+  const config=()=>({version:appVersion,instructions:meta.instructions||'',connected,connection,connections:meta.connections.map(c=>({...c,status:endpointStatuses.get(c.id)||{state:'saved'},hasSavedKey:!!secrets[credentialId(c)],hasSessionKey:!!sessionKeys[credentialId(c)]})),runningChats:[...runners].filter(([,r])=>r.busy).map(([id])=>id),connectionError,connectionNote,preferredModel:meta.preferredModels?.[credentialId(connection)]||null,hasSavedKey:!!secrets[credentialId(connection)],secureStorage:!!vault,models,projects:meta.projects,chats:meta.chats,binary:selectedBinary(),native:!!native,webAvailable:!!native?.webTools,browserAvailable:!!native?.browser,engine:engine?.status()||null,customEngine:!!meta.binary});
   function rememberProfile(){if(!connection.id)return;const i=meta.connections.findIndex(c=>c.id===connection.id);const p={...connection,models};if(i<0)meta.connections.push(p);else meta.connections[i]=p;meta.connection=connection;if(connected)endpointStatuses.set(connection.id,{state:'connected',checkedAt:Date.now()});}
   async function checkEndpoint(profile){
     if(endpointChecks.has(profile.id))return endpointChecks.get(profile.id);
@@ -217,10 +236,12 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
         if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_REQUEST:')){
           rpc.requestStarted=performance.now();rpc.requestStartedAt=Date.now();rpc.deltaCount=0;rpc.firstDelta=null;rpc.lastDelta=null;rpc.serverTimings=null;rpc.thinkingStart=null;rpc.thinkingMs=0;
           audit({type:'model_request',chatId:chat.id,...JSON.parse(e.message.slice(13))});
-          broadcast(chat.id,{type:'generation_start',model:chat.model,elapsedMs:0,requestStartedAt:rpc.requestStartedAt});return;
+          broadcast(chat.id,{type:'generation_start',model:chat.model,elapsedMs:0,requestStartedAt:rpc.requestStartedAt});
+          watchStudioContext(chat,rpc);return;
         }
         if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_RESPONSE:')){audit({type:'provider_response',chatId:chat.id,elapsedMs:rpc.requestStarted?performance.now()-rpc.requestStarted:null,...JSON.parse(e.message.slice(14))});return;}
         if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_SNAPSHOT:')){if(rpc.turn){try{checkpoints.snapshot(rpc.turn,JSON.parse(e.message.slice(14))).catch(()=>{});}catch{}}return;}
+        if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_PROGRESS:')){if(rpc.firstDelta===null){try{broadcast(chat.id,{type:'prompt_progress',...JSON.parse(e.message.slice(14))});}catch{}}return;}
         if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_TIMINGS:')){rpc.serverTimings=JSON.parse(e.message.slice(13));broadcast(chat.id,{type:'generation_timing',timings:rpc.serverTimings});return;}
         if(e.type==='extension_ui_request'&&e.method==='confirm')rpc.pendingApproval=e.id;
         if(e.type==='message_start'&&e.message?.role==='assistant'){rpc.messageStarted=rpc.requestStarted??performance.now();e.timing={elapsedMs:performance.now()-rpc.messageStarted};}

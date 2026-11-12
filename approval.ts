@@ -101,7 +101,8 @@ export default function(pi: any) {
     const notice=`\n\n<bolt_permissions>Current app permission mode: ${mode}. Available executable tools: ${tools.join(', ')||'none'}. ${mode==='chat'?(webEnabled?'Public web search and page reading are available.':'This is chat only.'):mode==='read'?'File reading and search are allowed.':mode==='ask'?'Use the tools to do the requested work; the app asks before edits or commands.':'The user enabled bypass: use the available tools to complete requested file edits and commands without another permission request.'} Current capabilities supersede earlier assistant statements about unavailable tools. Do not claim a file was saved unless a tool succeeded.</bolt_permissions>`;
     const rewrite=(s: string)=>s.replace(/<tools>[\s\S]*?<\/tools>/g,section).replace(/\n*<bolt_permissions>[\s\S]*?<\/bolt_permissions>/g,'');
     const payload={...event.payload,stream:true};
-    if(process.env.BOLT_LLAMA_TIMINGS==='1'&&ctx.model?.provider==='bolt-local')payload.timings_per_token=true;
+    // llama.cpp servers stream prompt_progress chunks while they read a long prompt.
+    if(process.env.BOLT_LLAMA_TIMINGS==='1'&&ctx.model?.provider==='bolt-local'){payload.timings_per_token=true;payload.return_progress=true;}
     if(process.env.BOLT_AUTO_OUTPUT==='1'&&ctx.model?.provider==='bolt-local'){delete payload.max_tokens;delete payload.max_completion_tokens;delete payload.max_output_tokens;}
     if(Array.isArray(payload.messages)){
       let first=true;payload.messages=payload.messages.map((m: any)=>{if(m.role!=='system'&&m.role!=='developer')return m;if(typeof m.content!=='string')return m;const content=rewrite(m.content)+(first?notice:'');first=false;return {...m,content};});
@@ -124,6 +125,13 @@ export default function(pi: any) {
     ctx.ui.notify('BOLT_RESPONSE:'+JSON.stringify({status:event.status,contentType:read('content-type'),contentEncoding:read('content-encoding')}),'info');
   });
   pi.on('provider_stream_event',(event: any,ctx: any)=>{
+    const progress=event.data?.prompt_progress;
+    if(progress&&typeof progress==='object'){
+      // Only numeric counters leave the engine, never prompt content.
+      const counts: Record<string,number>={};
+      for(const k of ['total','cache','processed','time_ms'])if(typeof progress[k]==='number'&&Number.isFinite(progress[k])&&progress[k]>=0)counts[k]=progress[k];
+      if(counts.total>0)ctx.ui.notify('BOLT_PROGRESS:'+JSON.stringify(counts),'info');
+    }
     const t=event.data?.timings;if(!t||typeof t!=='object')return;
     // Preserve only numeric performance counters, never provider payloads or content.
     const timings: Record<string,number>={};
