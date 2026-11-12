@@ -376,9 +376,25 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     meta.projects=meta.projects.filter(p=>p.id!==project.id);await save();
     res.json({deleted:true,chats:chats.map(c=>c.id)});
   });
+  // Reads a chat's conversation from its session file, following the latest branch.
+  // Used when the chat's engine cannot start, for example because its API is offline.
+  async function savedMessages(chatId){
+    const file=(await fs.readdir(sessionDir)).find(name=>name.endsWith('_'+chatId+'.jsonl'));
+    if(!file)return [];
+    const rows=(await fs.readFile(path.join(sessionDir,file),'utf8')).split('\n').filter(Boolean).flatMap(line=>{try{return [JSON.parse(line)];}catch{return [];}});
+    const byId=new Map(rows.filter(r=>r.id).map(r=>[r.id,r]));
+    const branch=[];
+    for(let row=rows.findLast(r=>r.id);row;row=row.parentId?byId.get(row.parentId):null)branch.push(row);
+    return branch.reverse().filter(r=>r.type==='message'&&['user','assistant','toolResult'].includes(r.message?.role)).map(r=>r.message);
+  }
   app.get('/api/chats/:id/history',async(req,res)=>{
     const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)return res.status(404).json({error:'Chat not found'});
-    const rpc=await runner(chat);const [messages,stats,state]=await Promise.all([rpc.command('get_messages'),rpc.command('get_session_stats'),rpc.command('get_state')]);
+    let rpc;
+    try{rpc=await runner(chat);}
+    catch(error){
+      const profile=meta.connections.find(c=>c.id===chat.connectionId);
+      return res.json({messages:await savedMessages(chat.id),stats:{},state:null,busy:false,sequence:0,live:null,approval:null,replyMetrics:await replyMetrics(chat.id),offline:{kind:'engine',api:profile?.name||'This chat’s API',message:error.message}});
+    }const [messages,stats,state]=await Promise.all([rpc.command('get_messages'),rpc.command('get_session_stats'),rpc.command('get_state')]);
     const metrics=await replyMetrics(chat.id),live=rpc.viewState?.streaming;
     res.json({messages:messages.messages,stats,state,busy:rpc.busy,sequence:rpc.eventSeq,live:live?{...live,elapsedMs:performance.now()-live.startedAt,firstDeltaMs:rpc.firstDelta,thinkingDurationMs:rpc.thinkingMs+(rpc.thinkingStart!==null?performance.now()-rpc.thinkingStart:0)}:null,approval:rpc.viewState?.approval,capabilities:rpc.capabilities,replyMetrics:metrics});
   });
@@ -619,7 +635,10 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     if(!chat){ws.close();return;}if(!subscribers.has(id))subscribers.set(id,new Set());subscribers.get(id).add(ws);
     ws.on('close',()=>subscribers.get(id)?.delete(ws));
     ws.on('message',async raw=>{try{
-      const msg=JSON.parse(raw);const rpc=await runner(chat);
+      const msg=JSON.parse(raw);
+      let rpc;
+      // Opening a chat whose API is offline should not report an error until the user sends something.
+      try{rpc=await runner(chat);}catch(error){if(msg.type==='levels')return;throw error;}
       if(msg.type==='prompt'){
         if(/^\s*\/bolt-(permissions|capabilities|web)\b/.test(msg.message||''))throw new Error('Use the chat controls to change tool permissions.');
         if(!rpc.models.length||(rpc.boundConnection.provider==='openai'&&!rpc.keySnapshot))throw new Error('Connect this chat’s model API in Settings first.');

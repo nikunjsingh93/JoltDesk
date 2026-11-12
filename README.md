@@ -24,6 +24,10 @@ Screenshots use a demo workspace and simulated model connections.
 
 ![JoltDesk settings showing both a local Qwen API and an OpenAI API marked connected](docs/screenshots/connections.png)
 
+## Offline APIs
+
+A chat still opens when its API is offline or has been removed. You can read the whole conversation, and choosing a model from any working API in the model menu continues the same chat there. The status bar shows which API is offline.
+
 ## Skills in 0.13
 
 A skill is a folder with a `SKILL.md` file that teaches the agent a specific task, using the open [Agent Skills](https://agentskills.io/specification) format. The agent sees each skill's name and description, and reads the full instructions only when a request matches. Type `/` in the message box to pick a skill, or type `/skill:name` followed by details to run one directly.

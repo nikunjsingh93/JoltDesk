@@ -75,7 +75,9 @@ function renderSidebar(){
 function renderModels(){
   const sections=(config.connections||[]).filter(c=>c.models?.length);
   $('#model').innerHTML=sections.length?sections.map(c=>`<optgroup label="${esc(c.name)}">${c.models.map(m=>`<option data-connection-id="${c.id}" data-model-id="${esc(m.id)}" value="${esc(c.id===config.connection?.id?m.id:c.id+'::'+m.id)}">${esc(m.name||m.id)}</option>`).join('')}</optgroup>`).join(''):config.models.length?config.models.map(m=>`<option value="${esc(m.id)}">${esc(m.name||m.id)}</option>`).join(''):'<option value="">Connect a model</option>';
-  if(current?.model&&config.models.some(m=>m.id===current.model))$('#model').value=current.model;
+  if(current?.model&&config.models.some(m=>m.id===current.model)&&(!current.connectionId||current.connectionId===config.connection?.id))$('#model').value=current.model;
+  // A chat bound to another (possibly offline) API shows its own model, so choosing any other model switches it.
+  else if(current?.connectionId&&current.connectionId!==config.connection?.id&&[...$('#model').options].some(o=>o.value===current.connectionId+'::'+current.model))$('#model').value=current.connectionId+'::'+current.model;
   else if(config.preferredModel&&config.models.some(m=>m.id===config.preferredModel))$('#model').value=config.preferredModel;
   else if(config.models.length)$('#model').value=config.models[0].id;
   $('#connection-label').textContent=config.connected?`${config.connection?.name||(config.connection?.provider==='local'?'Model API':'OpenAI')} · ${config.models.length} models`:'Local · ready to connect';
@@ -351,7 +353,9 @@ async function newChat(targetProjectId=projectId){try{saveCurrentState();const c
 async function openChat(chat){
   saveCurrentState();const seq=++generation;current=chat;projectId=chat.projectId||null;if(projectId){projectExpansion[projectId]=true;saveProjectExpansion();}messages=[];streaming=null;stats={};running=false;ws=null;approval=null;$('#approval-dialog').close();$('#prompt').value='';files=[];renderFiles();renderSidebar();renderChat();setRunning(false,false);
   try{
-    if(chat.connectionId&&chat.connectionId!==config.connection?.id){if(!(config.connections||[]).some(c=>c.id===chat.connectionId))throw new Error('This chat’s API was removed. Select another API/model to continue.');config=await api(`/connections/${chat.connectionId}/activate`,{});if(seq!==generation)return;}
+    // A chat still opens when its API is offline, so it can be read or moved to a working API.
+    let offline=null;
+    if(chat.connectionId&&chat.connectionId!==config.connection?.id){const saved=(config.connections||[]).find(c=>c.id===chat.connectionId);if(!saved)offline={kind:'removed'};else{try{config=await api(`/connections/${chat.connectionId}/activate`,{});}catch(error){offline={kind:'api',api:saved.name,message:error.message};}}if(seq!==generation)return;}
     let s=chatStates.get(chat.id);if(s?.loading){await s.ready;if(seq===generation)restoreChatState(s);return;}if(s?.loaded&&s.ws?.readyState===1){restoreChatState(s);return;}
     s=makeRuntime(chat);s.loading=true;s.ready=new Promise(resolve=>s.resolveReady=resolve);s.queue=[];chatStates.set(chat.id,s);
     const socket=new WebSocket(`${location.origin.replace('http','ws')}/stream?chat=${chat.id}&token=${encodeURIComponent(window.BOLT_TOKEN)}`);s.ws=socket;ws=socket;
@@ -361,9 +365,15 @@ async function openChat(chat){
     await new Promise((resolve,reject)=>{if(socket.readyState===1)resolve();else{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',()=>reject(new Error('Could not connect to this chat.')),{once:true});}});
     const history=await api(`/chats/${chat.id}/history`);s.messages=history.messages.map(m=>({...m,replyMetrics:history.replyMetrics?.[m.timestamp]}));s.stats=history.stats;s.running=!!(history.busy||history.state?.isStreaming);s.approval=history.approval;
     if(history.live){s.streaming={...history.live,startedAt:performance.now()-history.live.elapsedMs,thinkingTickAt:performance.now()};if(history.live.firstDeltaMs!=null)s.streaming.generationStartedAt=s.streaming.startedAt+history.live.firstDeltaMs;const i=s.messages.findIndex(m=>m.role==='assistant'&&m.timestamp===s.streaming.timestamp);if(i>=0)s.messages[i]=s.streaming;else s.messages.push(s.streaming);s.stage=s.streaming.isThinking?'Thinking…':'Writing a response…';}
+    s.offline=offline||history.offline||null;
     s.started=s.streaming?.startedAt||performance.now();s.loaded=true;s.loading=false;for(const e of s.queue)if(e.seq==null||e.seq>history.sequence)reduceBackground(s,e);s.queue=[];s.resolveReady();
-    if(seq===generation)restoreChatState(s);
+    if(seq===generation){restoreChatState(s);if(s.offline)showOffline(s.offline);}
   }catch(e){toast(e.message);$('#status').textContent='Engine needs attention';}
+}
+function showOffline(info){
+  if(info.kind==='api'){toast(`${info.api} is not reachable. You can read this chat. Pick a model from a working API to continue.`);$('#status').textContent=`${info.api} offline`;}
+  else if(info.kind==='removed'){toast('This chat’s API was removed. You can read this chat. Pick a model to continue.');$('#status').textContent='API removed';}
+  else{toast(`This chat could not start: ${info.message} Showing the saved conversation. Pick a model to continue.`);$('#status').textContent='Read-only';}
 }
 function restoreChatState(s){current=s.chat;messages=s.messages;streaming=s.streaming;running=s.running;started=s.started;chars=s.chars;usage=s.usage;stats=s.stats;finalSeconds=s.finalSeconds;ws=s.ws;files=s.files;followChat=s.followChat;approval=s.approval;$('#prompt').value=s.draft||'';$('#activity-text').textContent=s.stage;renderFiles();renderSidebar();renderChat();setRunning(s.running);$('#activity-text').textContent=s.stage;$('#status').textContent=s.running?(s.stage?.startsWith('Thinking')?'Generating':s.stage):'Pi-Bolt connected';if(approval)showApproval(approval);scrollBottom();document.body.classList.remove('sidebar-open');}
 function deliverChatEvent(s,e){
