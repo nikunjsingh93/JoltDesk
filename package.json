@@ -1,6 +1,6 @@
 {
   "name": "joltdesk",
-  "version": "0.14.3",
+  "version": "0.14.4",
   "private": true,
   "type": "module",
   "description": "A desktop workspace for local and remote AI models, powered by Pi-Bolt.",
@@ -42,6 +42,7 @@
     "files": [
       "desktop.cjs",
       "server.mjs",
+      "attachments.mjs",
       "rpc.mjs",
       "approval.ts",
       "public/**/*",

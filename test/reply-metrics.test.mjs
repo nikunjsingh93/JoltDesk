@@ -22,3 +22,12 @@ test('exact server generation speed wins over request time, includes thinking, s
  assert.equal(completedMetrics(m,10000,{timings:{...timings,predicted_per_second:undefined}}).tokensPerSecond,20);
  assert.equal(completedMetrics(m,10000,{timings:{predicted_n:81,predicted_ms:0,predicted_per_second:Infinity}}).tokensPerSecond,null);
 });
+
+
+test('live duration spans the whole turn while generation speed stays per request',()=>{
+  const m={live:true,startedAt:200000,turnStartedAt:0,generationStartedAt:201000,content:[],usage:{output:0,input:0}};
+  assert.equal(displayMetrics(m,246700).durationMs,246700);
+  assert.equal(elapsedText(displayMetrics(m,246700).durationMs),'4 min 6 secs');
+  const saved=completedMetrics({usage:{input:1,output:12}},300000,{timings:{predicted_n:12,predicted_ms:1000,predicted_per_second:11}});
+  assert.equal(saved.durationMs,300000);assert.equal(saved.tokensPerSecond,11);
+});

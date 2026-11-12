@@ -7,10 +7,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Rpc, findBinary } from './rpc.mjs';
 import { EngineManager } from './engine-updater.mjs';
-import { ASSUMED_CONTEXT, LOCAL_PROVIDER, OPENAI_CONNECTION, normalizeBaseUrl, optionalInteger, credentialId, discoverLocal, studioStatus, studioContextFor, studioVisionFor } from './connections.mjs';
+import { ASSUMED_CONTEXT, LOCAL_PROVIDER, OPENAI_CONNECTION, normalizeBaseUrl, optionalInteger, credentialId, discoverLocal, studioStatus, studioLoading, studioContextFor, studioVisionFor } from './connections.mjs';
 import { completedMetrics } from './public/reply-metrics.mjs';
 import {makeRuntime,reduceBackground,collectInspector} from './public/chat-runtime.mjs';
 import { createCheckpoints } from './checkpoints.mjs';
+import { storeAttachment, archiveAttachments } from './attachments.mjs';
 import * as gitOps from './git.mjs';
 import { createTerminals } from './terminal.mjs';
 import { listSkills, projectSkillRoots, createSkill, importSkill, removeSkill } from './skills.mjs';
@@ -106,6 +107,21 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
       rpc.studioWatch=setTimeout(tick,3000);
     };
     rpc.studioWatch=setTimeout(tick,1500);
+  }
+  function watchStudioLoading(chat,rpc){
+    const profile=meta.connections.find(c=>c.id===rpc.boundConnection?.id);
+    const model=(profile?.models||[]).find(m=>m.id===chat.model);
+    if(profile?.provider!=='local'||model?.studio!==true)return;
+    const request=rpc.requestStartedAt;let last=false;
+    const tick=async()=>{
+      if(!rpc.busy||rpc.requestStartedAt!==request||rpc.firstDelta!==null||rpc.promptProgressSeen)return;
+      const loading=await studioLoading(profile,rpc.keySnapshot,model);
+      if(!rpc.busy||rpc.requestStartedAt!==request||rpc.firstDelta!==null||rpc.promptProgressSeen)return;
+      const active=loading===true;
+      if(active!==last){last=active;broadcast(chat.id,{type:'model_loading',loading:active});}
+      setTimeout(tick,1500);
+    };
+    tick();
   }
   async function refreshStudioContext(chat,rpc){
     const profile=meta.connections.find(c=>c.id===rpc.boundConnection?.id);
@@ -240,14 +256,14 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
           // Remember the tools this chat has declared so a restarted engine declares the same set.
           if(rpc.capabilities.declaredMode&&(chat.declaredMode!==rpc.capabilities.declaredMode||!!chat.declaredWeb!==!!rpc.capabilities.declaredWeb)){chat.declaredMode=rpc.capabilities.declaredMode;chat.declaredWeb=!!rpc.capabilities.declaredWeb;save();}audit({type:'permissions',chatId:chat.id,...rpc.capabilities});broadcast(chat.id,{type:'capabilities',...rpc.capabilities});return;}
         if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_REQUEST:')){
-          rpc.requestStarted=performance.now();rpc.requestStartedAt=Date.now();rpc.deltaCount=0;rpc.firstDelta=null;rpc.lastDelta=null;rpc.serverTimings=null;rpc.thinkingStart=null;rpc.thinkingMs=0;
+          rpc.requestStarted=performance.now();rpc.requestStartedAt=Date.now();rpc.promptProgressSeen=false;rpc.deltaCount=0;rpc.firstDelta=null;rpc.lastDelta=null;rpc.serverTimings=null;rpc.thinkingStart=null;rpc.thinkingMs=0;
           audit({type:'model_request',chatId:chat.id,...JSON.parse(e.message.slice(13))});
-          broadcast(chat.id,{type:'generation_start',model:chat.model,elapsedMs:0,requestStartedAt:rpc.requestStartedAt});
-          watchStudioContext(chat,rpc);return;
+          broadcast(chat.id,{type:'generation_start',model:chat.model,elapsedMs:0,turnElapsedMs:rpc.turnStarted==null?0:performance.now()-rpc.turnStarted,requestStartedAt:rpc.requestStartedAt});
+          watchStudioContext(chat,rpc);watchStudioLoading(chat,rpc);return;
         }
         if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_RESPONSE:')){audit({type:'provider_response',chatId:chat.id,elapsedMs:rpc.requestStarted?performance.now()-rpc.requestStarted:null,...JSON.parse(e.message.slice(14))});return;}
         if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_SNAPSHOT:')){if(rpc.turn){try{checkpoints.snapshot(rpc.turn,JSON.parse(e.message.slice(14))).catch(()=>{});}catch{}}return;}
-        if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_PROGRESS:')){if(rpc.firstDelta===null){try{broadcast(chat.id,{type:'prompt_progress',...JSON.parse(e.message.slice(14))});}catch{}}return;}
+        if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_PROGRESS:')){if(rpc.firstDelta===null){rpc.promptProgressSeen=true;try{broadcast(chat.id,{type:'prompt_progress',...JSON.parse(e.message.slice(14))});}catch{}}return;}
         if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_TIMINGS:')){rpc.serverTimings=JSON.parse(e.message.slice(13));broadcast(chat.id,{type:'generation_timing',timings:rpc.serverTimings});return;}
         if(e.type==='extension_ui_request'&&e.method==='confirm')rpc.pendingApproval=e.id;
         if(e.type==='message_start'&&e.message?.role==='assistant'){rpc.messageStarted=rpc.requestStarted??performance.now();e.timing={elapsedMs:performance.now()-rpc.messageStarted};}
@@ -260,7 +276,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
         }
         if(e.type==='message_end'&&e.message?.role==='assistant'){
           if(rpc.thinkingStart!==null){rpc.thinkingMs+=performance.now()-rpc.thinkingStart;rpc.thinkingStart=null;}
-          e.replyMetrics=completedMetrics(e.message,performance.now()-(rpc.requestStarted??rpc.messageStarted??performance.now()),{timings:rpc.serverTimings,firstDeltaMs:rpc.firstDelta,lastDeltaMs:rpc.lastDelta,deltaCount:rpc.deltaCount,thinkingMs:rpc.thinkingMs});
+          e.replyMetrics=completedMetrics(e.message,performance.now()-(rpc.turnStarted??rpc.requestStarted??rpc.messageStarted??performance.now()),{timings:rpc.serverTimings,firstDeltaMs:rpc.firstDelta,lastDeltaMs:rpc.lastDelta,deltaCount:rpc.deltaCount,thinkingMs:rpc.thinkingMs});
           e.replyMetrics.outputLimit=rpc.boundConnection.maxTokens??'auto';
           const write=(metricWrites.get(chat.id)||Promise.resolve()).then(async()=>{const entries=await replyMetrics(chat.id);entries[e.message.timestamp]=e.replyMetrics;await fs.writeFile(path.join(metricsDir,chat.id+'.json'),JSON.stringify(entries));}).catch(()=>{});metricWrites.set(chat.id,write);
           audit({type:'reply_end',chatId:chat.id,stopReason:e.message.stopReason,...e.replyMetrics,firstDeltaMs:rpc.firstDelta,deltaCount:rpc.deltaCount});
@@ -291,7 +307,9 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   app.post('/internal/chats/:id/web',async(req,res)=>{
     const chat=meta.chats.find(item=>item.id===req.params.id);
     const rpc=runners.get(req.params.id);
-    if(req.headers.origin||!native?.webTools||!chat?.webEnabled||!rpc?.busy||!rpc.webKey||req.headers['x-bolt-web-key']!==rpc.webKey){
+    const kind=String(req.body.kind||'');
+    const localBrowser=kind.startsWith('browser-')&&!!native?.browser&&chat?.mode!=='chat';
+    if(req.headers.origin||!native?.webTools||(!chat?.webEnabled&&!localBrowser)||!rpc?.busy||!rpc.webKey||req.headers['x-bolt-web-key']!==rpc.webKey){
       return res.status(403).json({error:'Web access is disabled for this chat.'});
     }
     if(rpc.webPending>=4)return res.status(429).json({error:'Wait for the other web requests to finish.'});
@@ -302,7 +320,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
       const kind=String(req.body.kind||'');
       const signal=AbortSignal.any([cancel.signal,AbortSignal.timeout(kind.startsWith('browser-')?45000:15000)]);
       const result=kind.startsWith('browser-')
-        ?await (native.browser?native.browser.agent(kind,req.body.input||{},signal,{allowFiles:chat.mode!=='chat'}):Promise.reject(new Error('The JoltDesk browser is available in the desktop app.')))
+        ?await (native.browser?native.browser.agent(kind,req.body.input||{},signal,{allowFiles:chat.mode!=='chat',allowWeb:chat.webEnabled===true}):Promise.reject(new Error('The JoltDesk browser is available in the desktop app.')))
         :await native.webTools(kind,req.body.input||{},signal);
       if(!res.destroyed)res.json(result);
     }finally{rpc.webPending--;}
@@ -412,6 +430,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     await fs.rename(path.join(metricsDir,chat.id+'.json'),path.join(trash,'reply-metrics.json')).catch(e=>{if(e.code!=='ENOENT')throw e;});
     terminals.close(chat.id);
     await checkpoints.remove(chat.id,trash);
+    await archiveAttachments(chatCwd(chat),chat.id,trash);
     metricCache.delete(chat.id);
   }
   app.delete('/api/chats/:id',async(req,res)=>{
@@ -448,7 +467,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
       return res.json({messages:await savedMessages(chat.id),stats:{},state:null,busy:false,sequence:0,live:null,approval:null,replyMetrics:await replyMetrics(chat.id),offline:{kind:'engine',api:profile?.name||'This chat’s API',message:error.message}});
     }const [messages,stats,state]=await Promise.all([rpc.command('get_messages'),rpc.command('get_session_stats'),rpc.command('get_state')]);
     const metrics=await replyMetrics(chat.id),live=rpc.viewState?.streaming;
-    res.json({messages:messages.messages,stats,state,busy:rpc.busy,sequence:rpc.eventSeq,live:live?{...live,elapsedMs:performance.now()-live.startedAt,firstDeltaMs:rpc.firstDelta,thinkingDurationMs:rpc.thinkingMs+(rpc.thinkingStart!==null?performance.now()-rpc.thinkingStart:0)}:null,approval:rpc.viewState?.approval,capabilities:rpc.capabilities,replyMetrics:metrics});
+    res.json({messages:messages.messages,stats,state,busy:rpc.busy,sequence:rpc.eventSeq,live:live?{...live,elapsedMs:performance.now()-live.startedAt,turnElapsedMs:rpc.turnStarted==null?null:performance.now()-rpc.turnStarted,firstDeltaMs:rpc.firstDelta,thinkingDurationMs:rpc.thinkingMs+(rpc.thinkingStart!==null?performance.now()-rpc.thinkingStart:0)}:null,approval:rpc.viewState?.approval,capabilities:rpc.capabilities,replyMetrics:metrics});
   });
   const checkpointChat=req=>{const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)throw new Error('Chat not found');return chat;};
   app.get('/api/chats/:id/checkpoints',async(req,res)=>{checkpointChat(req);res.json({turns:await checkpoints.list(req.params.id)});});
@@ -695,7 +714,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
         if(/^\s*\/bolt-(permissions|capabilities|web)\b/.test(msg.message||''))throw new Error('Use the chat controls to change tool permissions.');
         if(!rpc.models.length||(rpc.boundConnection.provider==='openai'&&!rpc.keySnapshot))throw new Error('Connect this chat’s model API in Settings first.');
         if(rpc.busy)throw new Error('A response is already running.');
-        rpc.busy=true;
+        rpc.busy=true;rpc.turnStarted=performance.now();
         try{
           const webEnabled=!!rpc.webKey&&chat.webEnabled===true;
           if(!!rpc.capabilities?.webEnabled!==webEnabled){
@@ -711,13 +730,17 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
           for(const f of msg.files||[]){
             if(!f.name||typeof f.data!=='string')throw new Error('Invalid attachment');
             if(f.data.length>14000000)throw new Error('Attachment is too large.');
-            if(['image/png','image/jpeg','image/webp','image/gif'].includes(f.type)){
-              if(!model.input?.includes('image'))throw new Error('This model does not support image attachments. Choose a model that accepts images.');
-              images.push({type:'image',data:f.data,mimeType:f.type});
-            }else if(f.type?.startsWith('text/')||/\.(md|json|js|ts|tsx|jsx|py|rs|go|java|c|cpp|h|css|html|xml|yaml|yml|toml|csv|log|sql|sh|txt)$/i.test(f.name)){
-              const text=Buffer.from(f.data,'base64').toString('utf8');if(text.includes('\0'))throw new Error('Binary files are not supported.');
-              message+=`\n\n<attached_file name=${JSON.stringify(f.name)}>\n${text}\n</attached_file>`;
-            }else throw new Error('MVP attachments support text, source code, and images. PDF/Office support is not implemented yet.');
+            const image=['image/png','image/jpeg','image/webp','image/gif'].includes(f.type);
+            const textFile=f.type?.startsWith('text/')||/\.(md|json|js|ts|tsx|jsx|py|rs|go|java|c|cpp|h|css|html|xml|yaml|yml|toml|csv|log|sql|sh|txt)$/i.test(f.name);
+            if(image&&!model.input?.includes('image'))throw new Error('This model does not support image attachments. Choose a model that accepts images.');
+            if(!image&&!textFile)throw new Error('MVP attachments support text, source code, and images. PDF/Office support is not implemented yet.');
+            const bytes=Buffer.from(f.data,'base64');
+            const text=bytes.toString('utf8');if(!image&&text.includes('\0'))throw new Error('Binary files are not supported.');
+            const stored=await storeAttachment({cwd:chatCwd(chat),chatId:id,name:f.name,type:f.type,data:f.data,originalPath:f.path});
+            const attr=value=>String(value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            if(image)images.push({type:'image',data:f.data,mimeType:f.type});
+            else message+=`\n\n<attached_file name="${attr(f.name)}" path="${attr(stored.path)}">\n${text}\n</attached_file>`;
+            message+=`\n\nThis attachment is ${stored.copy?'a saved copy':'the user’s file'} at ${stored.path}. Use this exact absolute path for all file and browser tools; do not use a similarly named file in the working folder. Use browser_open to inspect it and edit for targeted changes when requested.`;
           }
           const note=restoreNotes.get(id);
           if(note){await rpc.command('prompt',{message:'/bolt-note '+note});restoreNotes.delete(id);}

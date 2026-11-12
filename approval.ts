@@ -55,7 +55,8 @@ export default function(pi: any) {
   const webUrl=process.env.BOLT_WEB_URL;
   const webKey=process.env.BOLT_WEB_KEY;
   const browserActions=['browser_click','browser_type','browser_press'];
-  const webTools=['web_search','browse_page','browser_open','browser_read','browser_click','browser_type','browser_press','browser_scroll','browser_screenshot'];
+  const browserTools=['browser_open','browser_read','browser_click','browser_type','browser_press','browser_scroll','browser_screenshot'];
+  const webTools=['web_search','browse_page',...browserTools];
   let webEnabled=false;
   // Clicking and typing need one approval per chat unless the user chose bypass.
   let browserApproved=false;
@@ -73,7 +74,7 @@ export default function(pi: any) {
       {name:'web_search',label:'Search the web',kind:'search',parameters:object({query:{type:'string'}},['query']),description:'Find public web pages. Use the returned source URLs to cite the answer.'},
       {name:'browse_page',label:'Read a web page',kind:'browse',parameters:object({url:{type:'string'}},['url']),description:'Read the text and links of a public URL without running its scripts. Follow a link by calling this tool with its URL.'},
       ...(browser?[
-        {name:'browser_open',label:'Open in JoltDesk browser',kind:'browser-open',parameters:object({url:{type:'string',description:'Web address, localhost URL, or full path of a local file'}},['url']),description:'Open a page or local file in a new tab of the user\'s JoltDesk browser, running its scripts. Returns page text and numbered elements to click or type into.'},
+        {name:'browser_open',label:'Open in JoltDesk browser',kind:'browser-open',parameters:object({url:{type:'string',description:'Web address, localhost URL, or full path of a local file'}},['url']),description:'Open a page or local file in JoltDesk’s browser, running its scripts. Use this instead of shell commands to open pages for inspection. Local files require Read files permission; web pages require Web. Returns page text and numbered elements.'},
         {name:'browser_read',label:'Read the browser page',kind:'browser-read',parameters:object({}),description:'Read the open page: text and numbered elements. Use it for the page the user is viewing or to refresh element numbers.'},
         {name:'browser_click',label:'Click in the browser',kind:'browser-click',parameters:object({element},['element']),description:'Click a numbered element on the open page. Returns the updated page.'},
         {name:'browser_type',label:'Type in the browser',kind:'browser-type',parameters:object({element,text:{type:'string'},submit:{type:'boolean',description:'Press Enter after typing'},clear:{type:'boolean',description:'Replace existing text (default true)'}},['element','text']),description:'Type into a numbered text field, optionally pressing Enter. Returns the updated page. Never for passwords.'},
@@ -110,7 +111,7 @@ export default function(pi: any) {
   // Permissions are enforced when a tool is called instead.
   const stableTools=process.env.BOLT_STABLE_TOOLS==='1';
   const known=()=>new Set(pi.getAllTools().map((t: any)=>t.name));
-  const toolsFor=(level: string,web: boolean)=>[...(level==='chat'?[]:level==='read'?readTools:fullTools),...(web?webTools:[])];
+  const toolsFor=(level: string,web: boolean)=>[...(level==='chat'?[]:level==='read'?readTools:fullTools),...(web?['web_search','browse_page']:[]),...((web||level!=='chat')?browserTools:[])];
   const allowed=()=>{const k=known();return toolsFor(mode!,webEnabled).filter(name=>k.has(name));};
   // A chat declares only the tools it has needed so far, and the set never shrinks:
   // a new chat-only chat sends no tool definitions, and toggling back and forth does
@@ -142,7 +143,7 @@ export default function(pi: any) {
     const tools=names();
     const listed=stableTools?declared():tools;
     const section='<tools>\n'+(listed.length?listed.map((n: string)=>'- '+n).join('\n'):'(none)')+'\n</tools>';
-    const notice=`\n\n<bolt_permissions>Current app permission mode: ${mode}. Available executable tools: ${tools.join(', ')||'none'}. ${mode==='chat'?(webEnabled?'Public web search and page reading are available.':'This is chat only.'):mode==='read'?'File reading and search are allowed.':mode==='ask'?'Use the tools to do the requested work; the app asks before edits or commands.':'The user enabled bypass: use the available tools to complete requested file edits and commands without another permission request.'} Current capabilities supersede earlier assistant statements about unavailable tools. Do not claim a file was saved unless a tool succeeded.</bolt_permissions>`;
+    const notice=`\n\n<bolt_permissions>Current app permission mode: ${mode}. Available executable tools: ${tools.join(', ')||'none'}. ${mode==='chat'?(webEnabled?'Public web search and page reading are available.':'This is chat only.'):mode==='read'?'File reading and search are allowed.':mode==='ask'?'Use the tools to do the requested work; the app asks before edits or commands.':'The user enabled bypass: use the available tools to complete requested file edits and commands without another permission request.'} Use browser_open and browser_screenshot to inspect pages, not shell commands that launch an external browser. When an attachment supplies a path, use that exact path for file tools. Current capabilities supersede earlier assistant statements about unavailable tools. Do not claim a file was saved unless a tool succeeded.</bolt_permissions>`;
     // Pi's documentation pointers only help when asking about the harness itself.
     const rewrite=(s: string)=>s.replace(/<tools>[\s\S]*?<\/tools>/g,section).replace(/\n*<bolt_permissions>[\s\S]*?<\/bolt_permissions>/g,'').replace(/\n*<docs>[\s\S]*?<\/docs>/g,'');
     if(stableTools&&Array.isArray(event.payload?.messages)){

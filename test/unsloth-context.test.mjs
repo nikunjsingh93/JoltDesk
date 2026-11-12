@@ -65,3 +65,15 @@ test('detects image support for Unsloth Studio models',async()=>{
     'unsloth/Qwen3.8-27B-GGUF':false
   });
 });
+
+
+test('Studio loading uses authenticated status and only identifies the requested model',async()=>{
+  const {studioLoading}=await import('../connections.mjs');
+  const connection={baseUrl:'http://localhost:1234/v1'},model={id:'wanted'};
+  let request;const response=loading=>async(url,options)=>{request={url,options};return {ok:true,json:async()=>({loading})};};
+  assert.equal(await studioLoading(connection,'secret',model,response(['wanted'])),true);
+  assert.equal(request.url,'http://localhost:1234/api/inference/status');assert.equal(request.options.headers.Authorization,'Bearer secret');
+  assert.equal(await studioLoading(connection,'',model,response(['other'])),false);
+  assert.equal(await studioLoading(connection,'',model,response(null)),null);
+  assert.equal(await studioLoading(connection,'',model,async()=>({ok:false})),null);
+});

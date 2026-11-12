@@ -22,8 +22,8 @@ const server=await startServer({
       webRequests.push({kind,input});
       return kind==='search'?{sources:[source]}:{...source,text:'Example page text.',links:[]};
     },
-    browser:{agent:async(kind,input)=>{
-      webRequests.push({kind,input});
+    browser:{agent:async(kind,input,_signal,options)=>{
+      webRequests.push({kind,input,options});
       if(kind==='browser-screenshot')return {url:source.url,title:source.title,image:Buffer.from('fake-jpeg').toString('base64'),mimeType:'image/jpeg'};
       return {...source,text:'Rendered page text.',links:[],elements:'[0] button "Go"',scroll:{top:0,view:800,height:2400}};
     }}
@@ -51,6 +51,28 @@ try{
     await expect.poll(()=>provider.requests.length).toBeGreaterThan(previous);
     await expect(page.locator('#send')).not.toHaveClass(/running/,{timeout:15000});
   };
+  // A real selected file keeps its disk path; an in-memory pasted image gets a copy.
+  const attachment=path.join(dir,'source.txt');await fs.writeFile(attachment,'Original attachment fixture.');
+  await page.locator('#file-input').setInputFiles(attachment);
+  await expect(page.locator('#attachments')).toContainText('source.txt');
+  await send('Read the attached file.');
+  assert.ok(JSON.stringify(provider.requests.at(-1)).includes(JSON.stringify(attachment).slice(1,-1)));
+  await page.locator('#prompt').evaluate(el=>{
+    const transfer=new DataTransfer();transfer.items.add(new File(['image fixture'],'pasted.png',{type:'image/png'}));
+    el.dispatchEvent(new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true}));
+  });
+  await expect(page.locator('#attachments')).toContainText('saved copy');
+  await send('Inspect the pasted image.');
+  const [chatId]=await fs.readdir(path.join(dir,'workspace','attachments'));
+  const copies=await fs.readdir(path.join(dir,'workspace','attachments',chatId));
+  assert.equal(copies.length,1);
+  const copy=path.join(dir,'workspace','attachments',chatId,copies[0]);
+  assert.equal(await fs.readFile(copy,'utf8'),'image fixture');
+  assert.ok(JSON.stringify(provider.requests.at(-1)).includes(JSON.stringify(copy).slice(1,-1)));
+  provider.tool('browser_open',{url:attachment});
+  await send('Open the attachment in JoltDesk.');
+  assert.deepEqual(webRequests.shift(),{kind:'browser-open',input:{url:attachment},options:{allowFiles:true,allowWeb:false}});
+  assert.ok((provider.requests.at(-1).tools||[]).some(t=>(t.name||t.function?.name)==='browser_open'));
   provider.tool('write',{path:'example file.txt',content:'File action fixture.'});
   await send('Write a fixture file.');
   const file=page.locator('[data-file-path="example file.txt"]');
@@ -79,10 +101,10 @@ try{
   assert.ok(provider.requests.some(body=>declared(body).includes('browse_page')));
   provider.tool('browser_open',{url:source.url});
   await send('Open that page in the browser.');
-  assert.deepEqual(webRequests[2],{kind:'browser-open',input:{url:source.url}});
+  assert.deepEqual(webRequests[2],{kind:'browser-open',input:{url:source.url},options:{allowFiles:true,allowWeb:true}});
   provider.tool('browser_read',{});
   await send('Read the page I have open.');
-  assert.deepEqual(webRequests[3],{kind:'browser-read',input:{}});
+  assert.deepEqual(webRequests[3],{kind:'browser-read',input:{},options:{allowFiles:true,allowWeb:true}});
   assert.ok(provider.requests.some(body=>declared(body).includes('browser_read')));
   assert.ok(JSON.stringify(provider.requests.at(-1)).includes('browser_type):\\n[0] button \\"Go\\"'),'the model should see numbered elements');
   // Clicking asks once per chat outside bypass mode.
@@ -94,10 +116,10 @@ try{
   await expect(page.locator('#approval-title')).toContainText('Allow browser actions?');
   await page.locator('#allow').click();
   await expect(page.locator('#send')).not.toHaveClass(/running/,{timeout:15000});
-  assert.deepEqual(webRequests.at(-1),{kind:'browser-click',input:{element:0}});
+  assert.deepEqual(webRequests.at(-1),{kind:'browser-click',input:{element:0},options:{allowFiles:true,allowWeb:true}});
   provider.tool('browser_type',{element:0,text:'thinkpad',submit:true});
   await send('Type a search.');
-  assert.deepEqual(webRequests.at(-1),{kind:'browser-type',input:{element:0,text:'thinkpad',submit:true}});
+  assert.deepEqual(webRequests.at(-1),{kind:'browser-type',input:{element:0,text:'thinkpad',submit:true},options:{allowFiles:true,allowWeb:true}});
   provider.tool('browser_screenshot',{});
   await send('Take a screenshot.');
   assert.equal(webRequests.at(-1).kind,'browser-screenshot');
@@ -108,6 +130,9 @@ try{
   await page.reload();
   await page.locator('.open-chat').click();
   await expect(page.locator('#web-tools')).toBeChecked();
+  await page.locator('.message.user [data-prompt-action="edit"]').first().click();
+  await expect(page.locator('#prompt')).toHaveValue('Read the attached file.');
+  await expect(page.locator('#toast')).toContainText('Reattach');
   console.log('FILES AND WEB UI PASS: real file modification time, left and right-click actions, optional web and browser tools, sources and persistence.');
 }finally{
   await app?.close();

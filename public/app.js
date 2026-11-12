@@ -299,10 +299,28 @@ function renderMessageBlocks(m,blocks){
   }
   return content;
 }
+function originalPrompt(m){
+  if(typeof m.promptText==='string')return {text:m.promptText,attachments:!!m.hasAttachments};
+  const raw=typeof m.content==='string'?m.content:(m.content||[]).filter(c=>c.type==='text').map(c=>c.text||'').join('\n');
+  const marker=raw.search(/\n\n(?:<attached_file\b|This attachment is (?:a saved copy|the user’s file) at )/);
+  return {text:(marker<0?raw:raw.slice(0,marker)).trim(),attachments:marker>=0||(m.content||[]).some?.(c=>c.type==='image')};
+}
 function messageNode(m,el=document.createElement('article')){
   if(!el.firstElementChild){
     el.className='message '+m.role;
     el.innerHTML=`<div class="message-head"><span class="avatar">${m.role==='user'?'N':'<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M13.5 2 4 14h7l-1 8L20 9h-7l.5-7Z"/></svg>'}</span>${m.role==='user'?'You':'JoltDesk'}<span class="message-model" style="color:var(--muted);font-size:10px;font-weight:400"></span></div><div class="blocks"></div>`;
+  }
+  if(m.role==='user'&&!el.querySelector('.prompt-actions')){
+    const actions=document.createElement('div');actions.className='prompt-actions';
+    actions.innerHTML='<button type="button" data-prompt-action="copy" title="Copy prompt">Copy</button><button type="button" data-prompt-action="edit" title="Edit and send again">Edit</button>';
+    actions.querySelector('[data-prompt-action="copy"]').onclick=async()=>{try{await navigator.clipboard.writeText(originalPrompt(m).text);toast('Prompt copied.');}catch{toast('Clipboard is unavailable. Select and copy the prompt.');}};
+    actions.querySelector('[data-prompt-action="edit"]').onclick=async()=>{
+      const prompt=originalPrompt(m),draft=$('#prompt').value;
+      if(draft.trim()&&draft!==prompt.text&&!await confirmAction({title:'Replace draft?',message:'Your current draft will be replaced by this earlier prompt.',confirm:'Replace draft'}))return;
+      $('#prompt').value=prompt.text;$('#prompt').focus();saveCurrentState();
+      if(prompt.attachments)toast('Prompt copied to the composer. Reattach its files before sending.');
+    };
+    el.append(actions);
   }
   const model=el.querySelector('.message-model');
   if(model.textContent!==(m.model||''))model.textContent=m.model||'';
@@ -329,7 +347,7 @@ function paintReplyMetrics(m,el){
   row.querySelector('[data-stat="speed"]').title=metric.rateEstimated?'Estimated generation speed from the first streamed thinking, text or tool token. Excludes initial waiting and prompt processing.':'Server-reported generation speed, including thinking and answer tokens. Excludes waiting and prompt processing.';
   row.querySelector('[data-stat="tokens"]').textContent=metric.output?`${metric.estimated?'~':''}${metric.output.toLocaleString()} ${metric.estimated?'est. ':''}tokens`:m.live?'Waiting for tokens…':'0 tokens';
   row.querySelector('[data-stat="time"]').textContent=elapsedText(metric.durationMs);
-  row.querySelector('[data-stat="time"]').title='Total request time, including waiting, prompt processing and generation.';
+  row.querySelector('[data-stat="time"]').title='Elapsed time since this prompt was sent, including tool calls and model requests.';
   row.querySelector('[data-stat="cost"]').textContent=metric.costText;
   row.classList.toggle('live',!!m.live);
 }
@@ -383,9 +401,9 @@ async function openChat(chat){
     socket.onclose=()=>{s.running=false;if(current?.id===chat.id){setRunning(false);$('#status').textContent='Connection closed · reopen chat to reconnect';}renderSidebar();};
     await new Promise((resolve,reject)=>{if(socket.readyState===1)resolve();else{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',()=>reject(new Error('Could not connect to this chat.')),{once:true});}});
     const history=await api(`/chats/${chat.id}/history`);s.messages=history.messages.map(m=>({...m,replyMetrics:history.replyMetrics?.[m.timestamp]}));s.stats=history.stats;s.running=!!(history.busy||history.state?.isStreaming);s.approval=history.approval;
-    if(history.live){s.streaming={...history.live,startedAt:performance.now()-history.live.elapsedMs,thinkingTickAt:performance.now()};if(history.live.firstDeltaMs!=null)s.streaming.generationStartedAt=s.streaming.startedAt+history.live.firstDeltaMs;const i=s.messages.findIndex(m=>m.role==='assistant'&&m.timestamp===s.streaming.timestamp);if(i>=0)s.messages[i]=s.streaming;else s.messages.push(s.streaming);s.stage=s.streaming.isThinking?'Thinking…':'Writing a response…';}
+    if(history.live){s.streaming={...history.live,startedAt:performance.now()-history.live.elapsedMs,turnStartedAt:performance.now()-(history.live.turnElapsedMs??history.live.elapsedMs),thinkingTickAt:performance.now()};if(history.live.firstDeltaMs!=null)s.streaming.generationStartedAt=s.streaming.startedAt+history.live.firstDeltaMs;const i=s.messages.findIndex(m=>m.role==='assistant'&&m.timestamp===s.streaming.timestamp);if(i>=0)s.messages[i]=s.streaming;else s.messages.push(s.streaming);s.stage=s.streaming.isThinking?'Thinking…':'Writing a response…';}
     s.offline=offline||history.offline||null;
-    s.started=s.streaming?.startedAt||performance.now();s.loaded=true;s.loading=false;for(const e of s.queue)if(e.seq==null||e.seq>history.sequence)reduceBackground(s,e);s.queue=[];s.resolveReady();
+    s.started=s.streaming?.turnStartedAt??performance.now();s.loaded=true;s.loading=false;for(const e of s.queue)if(e.seq==null||e.seq>history.sequence)reduceBackground(s,e);s.queue=[];s.resolveReady();
     if(seq===generation){restoreChatState(s);if(s.offline)showOffline(s.offline);}
   }catch(e){toast(e.message);$('#status').textContent='Engine needs attention';}
 }
@@ -417,6 +435,7 @@ function updateStreamNode(m){
 function renderStream(){if(renderScheduled)return;renderScheduled=true;setTimeout(()=>{renderScheduled=false;if(streaming?.el)updateStreamNode(streaming);},55);}
 function onEvent(e){
   if(e.type==='generation_timing'&&streaming){streaming.serverTimings=e.timings;paintReplyMetrics(streaming,streaming.el);}
+  if(e.type==='model_loading'&&running&&!chars){$('#activity-text').textContent=e.loading?'Loading model…':'Processing request · awaiting streamed tokens…';$('#status').textContent=e.loading?'Loading model':'Processing';}
   if(e.type==='prompt_progress'&&e.total>0){promptTotal=Number(e.total);updateMetrics();}
   if(e.type==='prompt_progress'&&running&&!chars&&e.total>0){
     const done=Math.min(e.total,Number(e.processed||0)),percent=Math.floor(100*done/e.total);
@@ -425,7 +444,7 @@ function onEvent(e){
   }
   if(e.type==='generation_start'){
     promptTotal=0;
-    streaming={role:'assistant',content:[],model:e.model||$('#model').value,live:true,placeholder:true,startedAt:performance.now()-(e.elapsedMs||0)};chars=0;usage={};messages.push(streaming);streaming.el=messageNode(streaming);$('#messages').append(streaming.el);$('#activity-text').textContent='Processing request · awaiting streamed tokens…';$('#status').textContent='Processing';scrollBottom();
+    streaming={role:'assistant',content:[],model:e.model||$('#model').value,live:true,placeholder:true,startedAt:performance.now()-(e.elapsedMs||0),turnStartedAt:performance.now()-(e.turnElapsedMs||0)};chars=0;usage={};messages.push(streaming);streaming.el=messageNode(streaming);$('#messages').append(streaming.el);$('#activity-text').textContent='Processing request · awaiting streamed tokens…';$('#status').textContent='Processing';scrollBottom();
     mountActivity(streaming);$('#activity').classList.remove('hidden');
   }
   if(e.type==='message_start'&&e.message?.role==='assistant'){
@@ -499,7 +518,7 @@ async function send(){
     if(images.length&&modelInfo&&!modelInfo.input?.includes('image')){toast(`${modelInfo.name||modelInfo.id} does not accept images. Choose a vision model, or remove the image to send text only. Your message is still in the box.`);return;}
     await patchChat({model:$('#model').value,thinking:$('#thinking').value,webEnabled:$('#web-tools').checked});
     const attached=[...files];const display=text+(attached.length?'\n\n'+attached.map(f=>'📎 '+f.name).join('\n'):'');
-    const m={role:'user',content:[{type:'text',text:display}]};messages.push(m);$('#welcome').classList.add('hidden');$('#messages').append(messageNode(m));
+    const m={role:'user',promptText:text,hasAttachments:!!attached.length,content:[{type:'text',text:display}]};messages.push(m);$('#welcome').classList.add('hidden');$('#messages').append(messageNode(m));
     $('#prompt').value='';files=[];renderFiles();followChat=true;setRunning(true);ws.send(JSON.stringify({type:'prompt',message:text,files:attached}));scrollBottom();
   }catch(e){toast(e.message);}
 }
@@ -626,8 +645,8 @@ $('#permission').onchange=async()=>{const mode=$('#permission').value;$('#permis
 $('#add-project').onclick=()=>$('#project-dialog').showModal();
 $('#browse').onclick=async()=>{try{const r=await api('/pick-folder',{});if(r.path){$('#project-path').value=r.path;if(!$('#project-name').value)$('#project-name').value=r.path.split(/[\\/]/).at(-1);}}catch(e){toast(e.message);}};
 $('#project-form').onsubmit=async e=>{e.preventDefault();try{const p=await api('/projects',{name:$('#project-name').value,path:$('#project-path').value});config.projects.push(p);projectId=p.id;$('#project-dialog').close();renderSidebar();await newChat();}catch(e){$('#project-feedback').textContent=e.message;}};
-function renderFiles(){$('#attachments').innerHTML=files.map((f,i)=>`<div class="attachment">▧ ${esc(f.name)} <button data-index="${i}" title="Remove attachment">✕</button></div>`).join('');$('#attachments').querySelectorAll('button').forEach(b=>b.onclick=()=>{files.splice(Number(b.dataset.index),1);renderFiles();});}
-async function addFiles(list){for(const f of list){if(f.size>8*1024*1024){toast(`${f.name}: maximum file size is 8 MB.`);continue;}const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=reject;r.readAsDataURL(f);});files.push({name:f.name,type:f.type,data});}renderFiles();}
+function renderFiles(){$('#attachments').innerHTML=files.map((f,i)=>`<div class="attachment" title="${esc(f.path||'Saved copy after sending')}">▧ ${esc(f.name)} · ${esc(f.path?(f.path.split(/[\\/]/).slice(-2,-1)[0]||f.path):'saved copy')} <button data-index="${i}" title="Remove attachment">✕</button></div>`).join('');$('#attachments').querySelectorAll('button').forEach(b=>b.onclick=()=>{files.splice(Number(b.dataset.index),1);renderFiles();});}
+async function addFiles(list){for(const f of list){if(f.size>8*1024*1024){toast(`${f.name}: maximum file size is 8 MB.`);continue;}const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=reject;r.readAsDataURL(f);});let filePath='';try{filePath=window.joltFiles?.pathFor(f)||'';}catch{}files.push({name:f.name||`pasted-image-${Date.now()}.${({'image/png':'png','image/jpeg':'jpg','image/webp':'webp','image/gif':'gif'})[f.type]||'bin'}`,type:f.type,data,path:filePath});}renderFiles();}
 $('#attach').onclick=()=>$('#file-input').click();$('#file-input').onchange=async e=>{await addFiles(e.target.files);e.target.value='';};
 $('#prompt').onpaste=async e=>{const f=[...e.clipboardData.items].filter(i=>i.kind==='file').map(i=>i.getAsFile());if(f.length){e.preventDefault();await addFiles(f);}};
 document.body.ondragover=e=>e.preventDefault();document.body.ondrop=async e=>{e.preventDefault();await addFiles(e.dataTransfer.files);};

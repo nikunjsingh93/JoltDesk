@@ -129,22 +129,26 @@ function createBrowserAgent({getActiveTab,createTab,waitForLoad,reveal,isAttache
     return point;
   }
 
-  return async function run(kind,input,signal,{allowFiles=false,checkPublic}={}){
+  return async function run(kind,input,signal,{allowFiles=false,allowWeb=true,checkPublic}={}){
+    const checkPage=tab=>{const url=tab.view.webContents.getURL();if(/^file:/i.test(url)&&!allowFiles)throw new Error('Opening local files needs the Read files permission or higher in this chat.');if(!allowWeb&&!/^file:/i.test(url))throw new Error('Turn on Web to access web pages in the JoltDesk browser.');};
+    const checkedSnapshot=(tab,...args)=>{checkPage(tab);return snapshot(tab,...args);};
     if(kind==='browser-open'){
       const url=await resolveAgentUrl(input.url,{allowFiles,checkPublic});
+      if(!allowWeb&&!/^file:/i.test(url))throw new Error('Turn on Web to open web pages in the JoltDesk browser.');
       reveal();
       const tab=createTab(url,{agent:true});
       await waitForLoad(tab,signal);
-      return snapshot(tab,12000);
+      return checkedSnapshot(tab,12000);
     }
     const tab=await activeTab();
+    checkPage(tab);
     const contents=tab.view.webContents;
     switch(kind){
-      case 'browser-read':return snapshot(tab,12000,80);
+      case 'browser-read':return checkedSnapshot(tab,12000,80);
       case 'browser-click':{
         mouseClick(contents,await target(tab,Number(input.element)));
         await settle(tab,signal);
-        return snapshot(tab);
+        return checkedSnapshot(tab);
       }
       case 'browser-type':{
         const text=String(input.text??'');
@@ -155,18 +159,18 @@ function createBrowserAgent({getActiveTab,createTab,waitForLoad,reveal,isAttache
         if(text)contents.insertText(text);
         if(input.submit===true){await sleep(80);pressKey(contents,'Enter');}
         await settle(tab,signal);
-        return snapshot(tab);
+        return checkedSnapshot(tab);
       }
       case 'browser-press':{
         pressKey(contents,String(input.key||''));
         await settle(tab,signal);
-        return snapshot(tab);
+        return checkedSnapshot(tab);
       }
       case 'browser-scroll':{
         const pages=Math.max(0.25,Math.min(10,Number(input.pages)||1));
         await call(tab,scrollPage,input.direction==='up'?'up':'down',pages);
         await sleep(400);
-        return snapshot(tab);
+        return checkedSnapshot(tab);
       }
       case 'browser-screenshot':{
         await sleep(150);
@@ -178,6 +182,7 @@ function createBrowserAgent({getActiveTab,createTab,waitForLoad,reveal,isAttache
         if(!image||image.isEmpty()){forceShow(tab);await sleep(500);image=await capture();}
         if(!image||image.isEmpty())throw new Error('The browser could not take a screenshot of this page. Show the JoltDesk window and try again.');
         if(image.getSize().width>1280)image=image.resize({width:1280});
+        checkPage(tab);
         return {url:contents.getURL(),title:contents.getTitle(),image:image.toJPEG(72).toString('base64'),mimeType:'image/jpeg'};
       }
       default:throw new Error('Unknown browser tool.');

@@ -24,7 +24,7 @@ export function completedMetrics(message,wallMs=0,generation={}){
 }
 export function displayMetrics(message,now){
   const saved=message.replyMetrics||{},count=outputCount(message);
-  const durationMs=message.live?Math.max(0,now-message.startedAt):Math.max(Number(saved.durationMs)||0,Number(message.durationMs)||0);
+  const durationMs=message.live?Math.max(0,now-(message.turnStartedAt??message.startedAt)):Math.max(Number(saved.durationMs)||0,Number(message.durationMs)||0);
   const server=generationTiming(message.live?message.serverTimings:saved.serverTimings);
   const exact=nativeCount(message.live?message.serverTimings:saved.serverTimings);
   const output=exact??saved.output??count.output,estimated=exact!==null?false:saved.estimated??count.estimated;

@@ -30,3 +30,5 @@
 
 .web-tools-toggle{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}.web-tools-toggle input{width:auto;margin:0;accent-color:var(--accent)}
 .answer-markdown pre{max-height:min(360px,48vh);max-width:100%;overflow:auto;overscroll-behavior:contain;overflow-anchor:none;white-space:pre}.answer-markdown pre>code{display:block;overflow:visible}
+
+.prompt-actions{display:flex;justify-content:flex-end;gap:4px;margin-top:8px}.prompt-actions button{border:0;padding:3px 6px;color:var(--muted);font-size:10px}.prompt-actions button:hover{color:var(--text)}

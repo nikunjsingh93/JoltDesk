@@ -6,7 +6,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { startServer } from '../server.mjs';
 
-const requests=[];let loaded=false;
+const requests=[];let loaded=false,loading=false;
 const studio=createServer(async(req,res)=>{
   let raw='';for await(const chunk of req)raw+=chunk;
   const url=new URL(req.url,'http://x');
@@ -14,8 +14,10 @@ const studio=createServer(async(req,res)=>{
   if(url.pathname==='/v1/models')return json({data:[{id:'ornith-test',owned_by:'unsloth-studio'}]});
   // Like Studio: the status names the model only once it is loaded for a request.
   if(url.pathname==='/v1/status')return json(loaded?{model_identifier:'ornith-test',active_model:'ornith-test',context_length:128640,is_vision:true}:{model_identifier:null,context_length:null});
+  if(url.pathname==='/api/inference/status')return json({loading:loading?['ornith-test']:[]});
   if(url.pathname==='/v1/chat/completions'){
-    requests.push(JSON.parse(raw));loaded=true;
+    requests.push(JSON.parse(raw));loading=true;
+    await new Promise(r=>setTimeout(r,3000));loading=false;loaded=true;
     res.writeHead(200,{'Content-Type':'text/event-stream'});
     const send=data=>res.write('data: '+JSON.stringify({id:'c1',object:'chat.completion.chunk',created:1,model:'ornith-test',...data})+'\n\n');
     send({choices:[],prompt_progress:{total:1000,cache:120,processed:430,time_ms:900}});
@@ -48,6 +50,7 @@ try{
   // No guessed limit before the server reports one.
   await expect(page.locator('#context')).not.toContainText('/');
   await page.locator('#prompt').fill('A long prompt');await page.locator('#send').click();
+  await expect(page.locator('#activity-text')).toHaveText('Loading model…',{timeout:10000});
   await expect(page.locator('#activity-text')).toHaveText('Processing prompt · 43% (430 / 1,000 tokens, 120 cached)',{timeout:15000});
   // While the prompt is read, the meter shows the server's prompt size rather than zero,
   // and the real limit appears before the reply.

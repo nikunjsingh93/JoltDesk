@@ -100,8 +100,14 @@ try{
   // Local files need file permission; LAN addresses stay blocked.
   result=await agent('browser-open',{url:localFile},{allowFiles:false});
   assert.match(result.error,/Read files permission/);
-  result=await agent('browser-open',{url:localFile});
+  result=await agent('browser-open',{url:localFile},{allowFiles:true,allowWeb:false});
   assert.equal(result.ok.title,'Koi pond');
+  result=await agent('browser-screenshot',{}, {allowFiles:true,allowWeb:false});
+  assert.equal(result.error,undefined,result.error);
+  result=await agent('browser-read',{}, {allowFiles:false,allowWeb:true});
+  assert.match(result.error,/Read files permission/);
+  result=await agent('browser-open',{url:origin+'/'},{allowFiles:true,allowWeb:false});
+  assert.match(result.error,/Turn on Web/);
   result=await agent('browser-read');
   assert.match(result.ok.text,/Koi pond simulator/);
   result=await agent('browser-open',{url:'http://192.168.1.1/'});

@@ -35,6 +35,17 @@ export async function studioStatus(connection,key,fetcher=fetch){
     return r.ok?await r.json():null;
   }catch{return null;}
 }
+// Studio's inference status reports an explicit list of models currently loading.
+export async function studioLoading(connection,key,model,fetcher=fetch){
+  const root=normalizeBaseUrl(connection.baseUrl).replace(/\/v1$/,'');
+  try{
+    const r=await fetcher(root+'/api/inference/status',{headers:key?{Authorization:`Bearer ${key}`}:{},redirect:'error',signal:AbortSignal.timeout(3000)});
+    if(!r.ok)return null;
+    const status=await r.json();if(!Array.isArray(status.loading))return null;
+    const names=[model.id,model.name,model.root].filter(v=>typeof v==='string'&&v);
+    return status.loading.some(name=>names.includes(name));
+  }catch{return null;}
+}
 export async function discoverLocal(connection,key,fetcher=fetch){
   const base=normalizeBaseUrl(connection.baseUrl),headers=key?{Authorization:`Bearer ${key}`}:{},root=base.replace(/\/v1$/,'');
   const request=async url=>{

@@ -11,8 +11,9 @@ export function updateThinking(message,timing,now){if(!message||timing?.thinking
 export function reduceBackground(s,e,now=performance.now()){
   trackTool(s,e);
   if(e.type==='agent_start'){s.running=true;s.started=now;}
+  if(e.type==='model_loading'&&!s.chars)s.stage=e.loading?'Loading model…':'Processing request · awaiting streamed tokens…';
   if(e.type==='prompt_progress'&&e.total>0)s.stage=`Processing prompt · ${Math.floor(100*Math.min(e.total,Number(e.processed||0))/e.total)}%`;
-  if(e.type==='generation_start'){s.streaming={role:'assistant',content:[],model:e.model,live:true,placeholder:true,startedAt:now-(e.elapsedMs||0)};s.messages.push(s.streaming);s.stage='Processing request…';s.usage={};s.chars=0;}
+  if(e.type==='generation_start'){s.streaming={role:'assistant',content:[],model:e.model,live:true,placeholder:true,startedAt:now-(e.elapsedMs||0),turnStartedAt:now-(e.turnElapsedMs||0)};s.messages.push(s.streaming);s.stage='Processing request…';s.usage={};s.chars=0;}
   if(e.type==='message_start'&&e.message?.role==='assistant'){
     if(s.streaming?.placeholder)Object.assign(s.streaming,e.message,{live:true,placeholder:false});
     else{s.streaming={...e.message,content:[],live:true,startedAt:now-(e.timing?.elapsedMs||0)};s.messages.push(s.streaming);}
