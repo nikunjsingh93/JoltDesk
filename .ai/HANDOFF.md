@@ -6,7 +6,7 @@ Updated November 12, 2026 by Claude Code.
 
 Added a live worker panel showing each configured model’s task, prompt-processing progress when provided, thinking/writing/tool/approval state, a short answer preview, and cumulative generated tokens. A tilde marks estimated streaming counts; reported usage replaces estimates at message completion. Worker progress is kept per chat and restored from the runner on reload. The user confirmed general-chat workers worked and requested publication of the combined feature as 0.14.8.
 
-Verification: `npm test` passed 52 tests with one existing skip; `worker-progress-ui-check`, `ui-check`, `changes-ui-check`, `files-web-ui-check`, and `cache-stability-ui-check` passed. The worker UI check covers two mock workers, live tokens and preview, reload recovery, and exact final usage. Its screenshot was inspected. Next: publish the requested 0.14.8 build and verify its GitHub asset digest.
+Verification: `npm test` passed 52 tests with one existing skip; `worker-progress-ui-check`, `ui-check`, `changes-ui-check`, `files-web-ui-check`, and `cache-stability-ui-check` passed. The worker UI check covers two mock workers, live tokens and preview, reload recovery, and exact final usage. Its screenshot was inspected. Published [0.14.8](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.14.8) from commit `6e1119a`; GitHub reports SHA-256 `97342e25f3d52a56209183692034719829309de8d30ea65d7bb2adb617bba940` for the ARM64 zip, matching the local artifact. The packaged app started with an isolated profile. Next: user-test live worker progress with their model servers.
 
 ## Question workers (November 12, 2026)
 
