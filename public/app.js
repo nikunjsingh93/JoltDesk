@@ -45,11 +45,19 @@ function renderSidebar(){
     const nameMatch=query&&p.name.toLowerCase().includes(query),chats=config.chats.filter(c=>c.projectId===p.id&&(!query||nameMatch||c.title.toLowerCase().includes(query)));
     if(query&&!nameMatch&&!chats.length)return '';
     const expanded=!!query||(projectExpansion[p.id]??projectId===p.id);
-    return `<section class="project-tree" data-project-id="${p.id}"><div class="project-heading ${projectId===p.id?'selected':''}"><button class="project-toggle" data-id="${p.id}" aria-label="${expanded?'Collapse':'Expand'} ${esc(p.name)}" aria-expanded="${expanded}" aria-controls="project-chats-${p.id}">${expanded?'⌄':'›'}</button><button class="open-project" data-id="${p.id}" title="${esc(p.path)}">▱ <span>${esc(p.name)}</span></button><button class="project-new-chat" data-id="${p.id}" aria-label="New chat in ${esc(p.name)}" title="New chat in this project">＋</button></div><div id="project-chats-${p.id}" class="project-chats" role="group" aria-label="Chats in ${esc(p.name)}" ${expanded?'':'hidden'}>${chats.map(chatRow).join('')||'<div class="empty-project">No chats yet</div>'}</div></section>`;
+    return `<section class="project-tree" data-project-id="${p.id}"><div class="project-heading ${projectId===p.id?'selected':''}"><button class="project-toggle" data-id="${p.id}" aria-label="${expanded?'Collapse':'Expand'} ${esc(p.name)}" aria-expanded="${expanded}" aria-controls="project-chats-${p.id}">${expanded?'⌄':'›'}</button><button class="open-project" data-id="${p.id}" title="${esc(p.path)}">▱ <span>${esc(p.name)}</span></button><button class="project-new-chat" data-id="${p.id}" aria-label="New chat in ${esc(p.name)}" title="New chat in this project">＋</button><button class="project-actions" data-id="${p.id}" aria-label="Project options: ${esc(p.name)}" aria-haspopup="menu" aria-controls="project-menu" aria-expanded="false" title="Project options">⋯</button></div><div id="project-chats-${p.id}" class="project-chats" role="group" aria-label="Chats in ${esc(p.name)}" ${expanded?'':'hidden'}>${chats.map(chatRow).join('')||'<div class="empty-project">No chats yet</div>'}</div></section>`;
   }).join('')||(!config.projects.length?'<div class="empty-side">Add a project to group chats.</div>':'');
   $('#projects').querySelectorAll('.project-toggle').forEach(b=>b.onclick=()=>{projectExpansion[b.dataset.id]=b.getAttribute('aria-expanded')!=='true';saveProjectExpansion();renderSidebar();});
   $('#projects').querySelectorAll('.open-project').forEach(b=>b.onclick=()=>{saveCurrentState();generation++;projectId=b.dataset.id;projectExpansion[projectId]=true;saveProjectExpansion();current=null;messages=[];streaming=null;stats={};ws=null;running=false;approval=null;$('#approval-dialog').close();renderSidebar();renderChat();setRunning(false);});
   $('#projects').querySelectorAll('.project-new-chat').forEach(b=>b.onclick=()=>newChat(b.dataset.id));
+  $('#projects').querySelectorAll('.project-actions').forEach(b=>b.onclick=()=>{
+    const menu=$('#project-menu');if(menu.matches(':popover-open')&&editingProjectId===b.dataset.id){menu.hidePopover();return;}
+    projectMenuTrigger?.setAttribute('aria-expanded','false');menu.hidePopover();editingProjectId=b.dataset.id;projectMenuTrigger=b;menu.showPopover();
+    const r=b.getBoundingClientRect(),box=menu.getBoundingClientRect();
+    menu.style.left=Math.max(8,Math.min(r.right-box.width,innerWidth-box.width-8))+'px';
+    menu.style.top=Math.max(8,r.bottom+box.height+8>innerHeight?r.top-box.height-4:r.bottom+4)+'px';
+    b.setAttribute('aria-expanded','true');$('#remove-project').focus();
+  });
   const chats=config.chats.filter(c=>!c.projectId&&c.title.toLowerCase().includes(query));
   $('#chat-count').textContent=chats.length;$('#chats').innerHTML=chats.map(chatRow).join('')||`<div class="empty-side">${query?'No matching general conversations.':'Your general conversations appear here.'}</div>`;
   $('.sidebar-navigation').querySelectorAll('.open-chat').forEach(b=>b.onclick=()=>openChat(config.chats.find(c=>c.id===b.dataset.id)));
@@ -461,7 +469,33 @@ const settingsDialog=$('#settings-dialog');
 const outsideSettings=e=>{const r=settingsDialog.getBoundingClientRect();return e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom;};
 settingsDialog.addEventListener('pointerdown',e=>{settingsBackdrop=e.target===settingsDialog&&outsideSettings(e);});
 settingsDialog.addEventListener('click',e=>{if(settingsBackdrop&&e.target===settingsDialog&&outsideSettings(e))settingsDialog.close();settingsBackdrop=false;});
-let editingChatId=null,chatMenuTrigger=null;
+let editingChatId=null,chatMenuTrigger=null,editingProjectId=null,projectMenuTrigger=null;
+$('#project-menu').addEventListener('toggle',e=>{if(e.newState==='closed')projectMenuTrigger?.setAttribute('aria-expanded','false');});
+$('#remove-project').onclick=()=>{
+  $('#project-menu').hidePopover();
+  const project=config.projects.find(p=>p.id===editingProjectId);if(!project)return;
+  const count=config.chats.filter(c=>c.projectId===project.id).length;
+  $('#remove-project-name').textContent=project.name;
+  $('#remove-project-path').textContent=project.path;
+  $('#remove-project-chats').textContent=count?`Its ${count} chat${count===1?' is':'s are'} deleted too.`:'';
+  $('#remove-project-feedback').textContent='';
+  $('#remove-project-dialog').showModal();$('#cancel-remove-project').focus();
+};
+$('#cancel-remove-project').onclick=()=>$('#remove-project-dialog').close();
+$('#confirm-remove-project').onclick=async()=>{
+  const id=editingProjectId,button=$('#confirm-remove-project');button.disabled=true;
+  try{
+    const result=await api(`/projects/${id}`,{},'DELETE');
+    config.projects=config.projects.filter(p=>p.id!==id);
+    config.chats=config.chats.filter(c=>!result.chats.includes(c.id));
+    for(const chatId of result.chats){chatStates.get(chatId)?.ws?.close();chatStates.delete(chatId);}
+    delete projectExpansion[id];saveProjectExpansion();
+    if(projectId===id)projectId=null;
+    if(current&&result.chats.includes(current.id)){generation++;ws=null;current=null;messages=[];streaming=null;stats={};setRunning(false);renderChat();updateMetrics();}
+    renderSidebar();$('#remove-project-dialog').close();toast('Project removed. Its folder was not changed.');
+  }catch(e){$('#remove-project-feedback').textContent=e.message;}
+  finally{button.disabled=false;}
+};
 $('#chat-menu').addEventListener('toggle',e=>{if(e.newState==='closed')chatMenuTrigger?.setAttribute('aria-expanded','false');});
 $('#chat-menu').addEventListener('keydown',e=>{const items=[...$('#chat-menu').querySelectorAll('[role=menuitem]')];if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();const i=items.indexOf(document.activeElement);items[e.key==='Home'?0:e.key==='End'?items.length-1:(i+(e.key==='ArrowUp'?-1:1)+items.length)%items.length].focus();}if(e.key==='Escape'){e.preventDefault();$('#chat-menu').hidePopover();chatMenuTrigger?.focus();}});
 const closeChatMenu=()=>$('#chat-menu').hidePopover();

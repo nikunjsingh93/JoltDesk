@@ -4,7 +4,7 @@ A standalone desktop GUI with **Pi-Bolt built in**, connected through its stream
 
 ## Run on Windows ARM64
 
-1. Open **JoltDesk-0.11.0-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
+1. Open **JoltDesk-0.12.0-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
 2. Open **Settings & connection**, select OpenAI or Local / OpenAI-compatible API, enter connection details, and click **Connect & discover models**.
 3. Pick a model and start chatting. No manual `models.json` changes, terminal commands, or Node installation are needed for the portable build.
 
@@ -24,17 +24,21 @@ Screenshots use a demo workspace and simulated model connections.
 
 ![JoltDesk settings showing both a local Qwen API and an OpenAI API marked connected](docs/screenshots/connections.png)
 
-## Terminal tab and instructions (unreleased)
+## Coding tools in 0.12
+
+0.12 adds the Changes, Git, and Terminal tabs and instruction files, described below. To remove a project, open its **⋯** menu in the sidebar and choose **Remove project**. This removes the project and its chats from JoltDesk and archives the chats in JoltDesk's trash folder. The project folder and its files are not changed. A project cannot be removed while one of its chats is replying.
+
+### Terminal tab and instructions
 
 The side panel's **Terminal** tab runs commands in the chat's folder: PowerShell on Windows (PowerShell 7 when it is installed), or your shell elsewhere. Output streams live. **Stop**, or Ctrl+C in an empty command box, ends the command and everything it started. A running command has its own input box for answering prompts. `cd` changes the terminal's folder, ↑ and ↓ recall earlier commands, and **Clear** or Ctrl+L removes finished commands. Commands the agent runs with `bash` or `powershell` appear in the same list, marked ϟ, with live output. **Stop** on one of them stops the agent's reply. The terminal has no pseudo-terminal, so full-screen programs such as editors do not work there.
 
 The agent follows instruction files. It reads `AGENTS.md`, or `CLAUDE.md` when a folder has no `AGENTS.md`, from the chat's folder and every folder above it. The Files tab lists the files a chat uses. Click one to open it, or use **＋ Create AGENTS.md** to start one in the chat's folder. **Settings → Personal instructions** apply to every chat. Changes take effect from each chat's next message.
 
-## Git tab (unreleased)
+### Git tab
 
 The side panel's **Git** tab shows the Git repository for a project chat's folder: the branch, whether it is ahead of or behind its upstream, the changed files, and the most recent commits. Click a file to see its diff against the last commit. Tick the files to include, then write a message or click **✨ Write message** to have the chat's model write one from the selected changes. That request runs separately and does not appear in the conversation. **Commit** commits only the ticked files. **Push** sends commits to the upstream branch, and **Publish** pushes a new branch and sets its upstream. JoltDesk uses the `git` command on your PATH with your existing Git identity and credentials. Commits wait until the chat's reply finishes.
 
-## Review and undo agent changes (unreleased)
+### Review and undo agent changes
 
 The side panel has a **Changes** tab next to **Files** and **Browser**. Every request that edits files appears there with the files it changed and their added and removed line counts. Click a file to see a line diff.
 

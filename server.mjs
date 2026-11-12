@@ -340,10 +340,10 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     if(req.body.webEnabled!==undefined)chat.webEnabled=!!native?.webTools&&req.body.webEnabled===true;
     await save();res.json(chat);
   });
-  app.delete('/api/chats/:id',async(req,res)=>{
-    const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)return res.status(404).json({error:'Chat not found'});
-    if(starting.has(chat.id))return res.status(409).json({error:'This chat is still opening. Try deleting it again in a moment.'});
-    if(runners.get(chat.id)?.busy)return res.status(409).json({error:'Stop this chat’s response before deleting it.'});
+  // Whether a chat can be deleted now, or the reason it cannot.
+  const deleteBlocker=chat=>starting.has(chat.id)?'This chat is still opening. Try deleting it again in a moment.':runners.get(chat.id)?.busy?'Stop this chat’s response before deleting it.':null;
+  // Deletes a chat from JoltDesk and archives its files under <data>/trash.
+  async function archiveChat(chat){
     // Keep a tombstone so recovery and older workspace copies cannot restore a deleted chat.
     meta.deletedChatIds=[...new Set([...(meta.deletedChatIds||[]),chat.id])];await save();
     const rpc=runners.get(chat.id);
@@ -357,7 +357,21 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     await fs.rename(path.join(metricsDir,chat.id+'.json'),path.join(trash,'reply-metrics.json')).catch(e=>{if(e.code!=='ENOENT')throw e;});
     terminals.close(chat.id);
     await checkpoints.remove(chat.id,trash);
-    metricCache.delete(chat.id);res.json({deleted:true});
+    metricCache.delete(chat.id);
+  }
+  app.delete('/api/chats/:id',async(req,res)=>{
+    const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)return res.status(404).json({error:'Chat not found'});
+    const blocker=deleteBlocker(chat);if(blocker)return res.status(409).json({error:blocker});
+    await archiveChat(chat);res.json({deleted:true});
+  });
+  // Removes a project and its chats from JoltDesk. The project folder is not touched.
+  app.delete('/api/projects/:id',async(req,res)=>{
+    const project=meta.projects.find(p=>p.id===req.params.id);if(!project)return res.status(404).json({error:'Project not found'});
+    const chats=meta.chats.filter(c=>c.projectId===project.id);
+    if(chats.some(c=>deleteBlocker(c)))return res.status(409).json({error:'Stop this project’s running responses before removing it.'});
+    for(const chat of chats)await archiveChat(chat);
+    meta.projects=meta.projects.filter(p=>p.id!==project.id);await save();
+    res.json({deleted:true,chats:chats.map(c=>c.id)});
   });
   app.get('/api/chats/:id/history',async(req,res)=>{
     const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)return res.status(404).json({error:'Chat not found'});

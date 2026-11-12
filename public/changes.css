@@ -45,3 +45,10 @@
 .instructions-actions{display:flex;align-items:center;gap:10px;margin-top:10px}
 .instructions-actions button{padding:6px 11px;font-size:11px}
 #instructions-feedback{font-size:11px;color:var(--accent)}
+/* Project options menu (same look as the chat menu). */
+#project-menu{position:fixed;inset:auto;margin:0;width:165px;padding:5px;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow)}
+#project-menu button{display:block;width:100%;padding:9px 12px;border:0;text-align:left;font-size:12px;border-radius:5px}
+#project-menu button:focus{outline:none;background:var(--panel2)}
+#projects .project-actions{width:24px;flex:0 0 24px;justify-content:center;padding:5px 2px;font-size:16px}
+#projects .project-actions:hover{color:var(--text)}
+#remove-project-dialog code{font-size:11px;overflow-wrap:anywhere}
