@@ -51,26 +51,49 @@ try{
   await send('First message in chat-only mode.');
   const first=requests.at(-1);
   assert.match(tail(first),/bolt_permission_state.*chat/);
-  assert.ok(JSON.parse(toolNames(first)).includes('write'),'local models always declare the full tool set');
+  // A new chat-only chat sends no tool definitions and no documentation pointers.
+  assert.equal(toolNames(first),'[]');
+  assert.doesNotMatch(systemText(first),/<docs>/);
 
+  // Raising permissions adds tools once.
   await page.locator('#web-tools').check();
   await send('Now with Web on.');
   await page.locator('#permission').selectOption('read');
   await expect(page.locator('#toast')).toContainText('Permissions updated');
   await send('Now in Read files mode.');
-  const [a,b,c]=requests.slice(-3);
-  assert.equal(toolNames(b),toolNames(a));assert.equal(toolNames(c),toolNames(a));
-  assert.equal(systemText(b),systemText(a));assert.equal(systemText(c),systemText(a));
-  // Earlier messages are sent unchanged, so the server can reuse its cache for them.
-  assert.equal(JSON.stringify(c.messages.slice(0,b.messages.length-1)),JSON.stringify(b.messages.slice(0,b.messages.length-1)));
-  assert.match(tail(c),/read/);assert.doesNotMatch(tail(a),/web_search, /);
+  const raised=requests.at(-1);
+  assert.ok(JSON.parse(toolNames(raised)).includes('read'));assert.ok(JSON.parse(toolNames(raised)).includes('web_search'));
+  assert.ok(!JSON.parse(toolNames(raised)).includes('write'),'write is not declared until the chat needs it');
+  // Built-in tool descriptions are the compact wording.
+  assert.match(JSON.stringify(raised.tools),/Read a text or image file/);
 
-  // A tool outside the current permissions is blocked, with a reason the model can use.
-  nextTool={name:'write',args:{path:'blocked.txt',content:'x'}};
-  await send('Try to write a file.');
-  const toolResult=requests.at(-1).messages.find(m=>m.role==='tool');
+  // Lowering and raising again leaves the start of the prompt identical.
+  await page.locator('#permission').selectOption('chat');
+  await expect(page.locator('#toast')).toContainText('Permissions updated');
+  await page.locator('#web-tools').uncheck();
+  await send('Back to chat only.');
+  const lowered=requests.at(-1);
+  await page.locator('#web-tools').check();
+  await page.locator('#permission').selectOption('read');
+  await expect(page.locator('#toast')).toContainText('Permissions updated');
+  await send('Read files again.');
+  const again=requests.at(-1);
+  assert.equal(toolNames(lowered),toolNames(raised));assert.equal(toolNames(again),toolNames(raised));
+  assert.equal(systemText(lowered),systemText(raised));assert.equal(systemText(again),systemText(raised));
+  // Earlier messages are sent unchanged, so the server can reuse its cache for them.
+  assert.equal(JSON.stringify(again.messages.slice(0,lowered.messages.length-1)),JSON.stringify(lowered.messages.slice(0,lowered.messages.length-1)));
+  assert.match(tail(lowered),/chat/);assert.match(tail(again),/read/);
+
+  // A declared tool outside the current permissions is blocked, with a reason the model can use.
+  await page.locator('#permission').selectOption('chat');
+  await expect(page.locator('#toast')).toContainText('Permissions updated');
+  nextTool={name:'read',args:{path:'secret.txt'}};
+  await send('Try to read a file.');
+  const toolResult=requests.at(-1).messages.findLast(m=>m.role==='tool');
   assert.match(JSON.stringify(toolResult.content),/not allowed right now/);
-  await assert.rejects(fs.stat(path.join(dir,'workspace','blocked.txt')));
+  // The chat remembers its declared tools so a restarted engine sends the same set.
+  const saved=(await call('/config')).chats.find(c=>c.title.startsWith('First message'));
+  assert.deepEqual({mode:saved.declaredMode,web:saved.declaredWeb},{mode:'read',web:true});
 
   // Switching this ~32K-token chat to another local model warns first.
   await page.evaluate(()=>{const option=[...document.querySelectorAll('#model option')].find(o=>o.dataset.modelId==='model-b');localStorage.setItem('joltdesk-prefill:'+option.dataset.connectionId+'::model-b','37');});

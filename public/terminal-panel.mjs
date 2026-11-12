@@ -67,6 +67,9 @@ export function initTerminalPanel({api,toast,currentChat,abortAgent}){
     chatId=chat?.id||null;entries.clear();
     if(!chatId){setCwd('');empty('Open a conversation to use its terminal.');counts();return;}
     const mine=++ticket,id=chatId;
+    // Events that arrive while the snapshot loads are held, then applied on top of it,
+    // so a command started during the load is not wiped by the older snapshot.
+    held=[];
     try{
       const state=await api(`/chats/${id}/terminal`);
       if(mine!==ticket||id!==chatId)return;
@@ -74,13 +77,19 @@ export function initTerminalPanel({api,toast,currentChat,abortAgent}){
       setCwd(state.cwd,state.shell);
       if(!state.entries.length)empty('Commands you run here, and commands the agent runs, appear with live output.');
       for(const entry of state.entries)add(entry);
+      const known=new Set(state.entries.map(entry=>entry.id));
+      const pending=held;held=null;
+      // Output for entries already in the snapshot is included there; replay the rest.
+      for(const e of pending)if(e.op!=='output'&&e.op!=='replace'||!known.has(e.id))event(e);
       output.scrollTop=output.scrollHeight;
       counts();
-    }catch(error){if(mine===ticket)empty(error.message);}
+    }catch(error){if(mine===ticket){held=null;empty(error.message);}}
   }
 
+  let held=null;
   function event(e){
     if(!chatId||chatId!==currentChat()?.id)return;
+    if(held){held.push(e);return;}
     if(e.op==='start'){if(!entries.has(e.entry.id))add(e.entry);}
     else if(e.op==='output'||e.op==='replace'){
       const item=entries.get(e.id);if(!item)return;

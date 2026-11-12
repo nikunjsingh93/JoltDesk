@@ -4,6 +4,35 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
 const MAX_SNAPSHOT_BYTES=5*1024*1024;
+
+// Shorter wording for the engine's built-in tools. Every request uses the same text,
+// so the server's prompt cache still matches. Limits and editing rules are kept.
+const COMPACT_TOOLS: Record<string,{description:string,parameters:Record<string,string>,items?:Record<string,string>}>={
+  read:{description:'Read a text or image file. Text output stops at 2000 lines or 50KB; continue with offset and limit.',parameters:{path:'File path',offset:'First line, starting at 1',limit:'Maximum lines'}},
+  write:{description:'Create or overwrite a file. Parent folders are created.',parameters:{path:'File path',content:'Full file content'}},
+  edit:{description:'Replace exact text in one file. Each oldText must match a unique part of the original file and must not overlap another edit; merge nearby changes into one edit.',parameters:{path:'File path',edits:'Replacements, each matched against the original file'},items:{oldText:'Exact, unique text to replace',newText:'Replacement text'}},
+  bash:{description:'Run a bash command in the working folder. Returns stdout and stderr, cut to the last 2000 lines or 50KB.',parameters:{command:'Command to run',timeout:'Timeout in seconds (optional)'}},
+  powershell:{description:'Run a PowerShell command in the working folder. Returns stdout and stderr, cut to the last 2000 lines or 50KB.',parameters:{command:'Command to run',timeout:'Timeout in seconds (optional)'}},
+  grep:{description:'Search file contents, respecting .gitignore. Returns path, line number and text, up to 100 matches.',parameters:{pattern:'Regex, or plain text with literal',path:'Folder or file (default: working folder)',glob:'File filter, such as *.ts or src/**/*.ts',ignoreCase:'Ignore case',literal:'Treat pattern as plain text',context:'Lines of context around each match',limit:'Maximum matches (default 100)'}},
+  find:{description:'Find files by glob pattern, respecting .gitignore. Up to 1000 results.',parameters:{pattern:'Glob, such as **/*.json',path:'Folder (default: working folder)',limit:'Maximum results'}},
+  ls:{description:'List a folder, including dotfiles. Folders end with /. Up to 500 entries.',parameters:{path:'Folder (default: working folder)',limit:'Maximum entries'}}
+};
+function compactTool(tool: any){
+  const fn=tool?.function||tool;
+  const compact=COMPACT_TOOLS[fn?.name];
+  if(!compact||!fn.parameters?.properties)return tool;
+  const properties: any={};
+  for(const [key,value] of Object.entries<any>(fn.parameters.properties)){
+    const next={...value};
+    if(compact.parameters[key])next.description=compact.parameters[key];
+    if(compact.items&&value.items?.properties){
+      next.items={...value.items,properties:Object.fromEntries(Object.entries<any>(value.items.properties).map(([k,v])=>[k,compact.items![k]?{...v,description:compact.items![k]}:v]))};
+    }
+    properties[key]=next;
+  }
+  const updated={...fn,description:compact.description,parameters:{...fn.parameters,properties}};
+  return tool?.function?{...tool,function:updated}:updated;
+}
 function snapshot(input: any,ctx: any){
   let file=String(input?.path??input?.file_path??'');
   if(file.startsWith('@'))file=file.slice(1);
@@ -31,7 +60,7 @@ export default function(pi: any) {
   // Clicking and typing need one approval per chat unless the user chose bypass.
   let browserApproved=false;
   const object=(properties:any,required:string[]=[])=>({type:'object',properties,required,additionalProperties:false});
-  const element={type:'integer',description:'Element number from the latest page listing, for example 3 for [3].'};
+  const element={type:'integer',description:'Element number from the latest listing'};
   // Formats a browser snapshot: page text plus numbered elements the agent can act on.
   const pageText=(result:any)=>{
     const scroll=result.scroll&&result.scroll.height>result.scroll.view+8
@@ -44,13 +73,13 @@ export default function(pi: any) {
       {name:'web_search',label:'Search the web',kind:'search',parameters:object({query:{type:'string'}},['query']),description:'Find public web pages. Use the returned source URLs to cite the answer.'},
       {name:'browse_page',label:'Read a web page',kind:'browse',parameters:object({url:{type:'string'}},['url']),description:'Read the text and links of a public URL without running its scripts. Follow a link by calling this tool with its URL.'},
       ...(browser?[
-        {name:'browser_open',label:'Open in JoltDesk browser',kind:'browser-open',parameters:object({url:{type:'string',description:'A web address, a local dev server such as http://localhost:3000, or the full path of a local file such as an HTML page you created.'}},['url']),description:'Open a page in a new tab of the user\'s visible JoltDesk browser and run its scripts. Returns the page text and numbered interactive elements. Use it to show pages, test web pages or local HTML files you built, and to start tasks that need clicking or typing.'},
-        {name:'browser_read',label:'Read the browser page',kind:'browser-read',parameters:object({}),description:'Read the page currently open in the JoltDesk browser: its text and numbered interactive elements. Use this when the user refers to the page they are viewing, or to refresh element numbers.'},
-        {name:'browser_click',label:'Click in the browser',kind:'browser-click',parameters:object({element},['element']),description:'Click a numbered element (link, button, checkbox, tab) on the open browser page. Returns the updated page.'},
-        {name:'browser_type',label:'Type in the browser',kind:'browser-type',parameters:object({element,text:{type:'string'},submit:{type:'boolean',description:'Press Enter after typing, for example to run a search.'},clear:{type:'boolean',description:'Replace the existing text. Defaults to true.'}},['element','text']),description:'Type text into a numbered text field on the open browser page, optionally pressing Enter. Returns the updated page. Never use it for passwords.'},
-        {name:'browser_press',label:'Press a key in the browser',kind:'browser-press',parameters:object({key:{type:'string',enum:['Enter','Tab','Escape','Backspace','Delete','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End']}},['key']),description:'Press a key on the open browser page, for example ArrowDown to move through suggestions or Escape to close a dialog. Returns the updated page.'},
-        {name:'browser_scroll',label:'Scroll the browser',kind:'browser-scroll',parameters:object({direction:{type:'string',enum:['down','up']},pages:{type:'number',description:'How many screens to scroll. Defaults to 1.'}},['direction']),description:'Scroll the open browser page to see more of it. Returns the updated page.'},
-        {name:'browser_screenshot',label:'Screenshot the browser',kind:'browser-screenshot',parameters:object({}),description:'Take a screenshot of the open browser page to check how it looks, for example the layout of a page you built. Needs a model that accepts images.'}
+        {name:'browser_open',label:'Open in JoltDesk browser',kind:'browser-open',parameters:object({url:{type:'string',description:'Web address, localhost URL, or full path of a local file'}},['url']),description:'Open a page or local file in a new tab of the user\'s JoltDesk browser, running its scripts. Returns page text and numbered elements to click or type into.'},
+        {name:'browser_read',label:'Read the browser page',kind:'browser-read',parameters:object({}),description:'Read the open page: text and numbered elements. Use it for the page the user is viewing or to refresh element numbers.'},
+        {name:'browser_click',label:'Click in the browser',kind:'browser-click',parameters:object({element},['element']),description:'Click a numbered element on the open page. Returns the updated page.'},
+        {name:'browser_type',label:'Type in the browser',kind:'browser-type',parameters:object({element,text:{type:'string'},submit:{type:'boolean',description:'Press Enter after typing'},clear:{type:'boolean',description:'Replace existing text (default true)'}},['element','text']),description:'Type into a numbered text field, optionally pressing Enter. Returns the updated page. Never for passwords.'},
+        {name:'browser_press',label:'Press a key in the browser',kind:'browser-press',parameters:object({key:{type:'string',enum:['Enter','Tab','Escape','Backspace','Delete','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End']}},['key']),description:'Press a key on the open page. Returns the updated page.'},
+        {name:'browser_scroll',label:'Scroll the browser',kind:'browser-scroll',parameters:object({direction:{type:'string',enum:['down','up']},pages:{type:'number',description:'Screens to scroll (default 1)'}},['direction']),description:'Scroll the open page. Returns the updated page.'},
+        {name:'browser_screenshot',label:'Screenshot the browser',kind:'browser-screenshot',parameters:object({}),description:'Screenshot the open page to check how it looks. Needs a model that accepts images.'}
       ]:[])
     ]){
       pi.registerTool({
@@ -81,14 +110,22 @@ export default function(pi: any) {
   // Permissions are enforced when a tool is called instead.
   const stableTools=process.env.BOLT_STABLE_TOOLS==='1';
   const known=()=>new Set(pi.getAllTools().map((t: any)=>t.name));
-  const allowed=()=>{const k=known();return [...(mode==='chat'?[]:mode==='read'?readTools:fullTools),...(webEnabled?webTools:[])].filter(name=>k.has(name));};
-  const declared=()=>{const k=known();return [...fullTools,...webTools].filter(name=>k.has(name));};
+  const toolsFor=(level: string,web: boolean)=>[...(level==='chat'?[]:level==='read'?readTools:fullTools),...(web?webTools:[])];
+  const allowed=()=>{const k=known();return toolsFor(mode!,webEnabled).filter(name=>k.has(name));};
+  // A chat declares only the tools it has needed so far, and the set never shrinks:
+  // a new chat-only chat sends no tool definitions, and toggling back and forth does
+  // not change the start of the prompt. The server keeps the high-water mark per chat.
+  let declaredMode=modes.includes(process.env.BOLT_DECLARED_MODE||'')?process.env.BOLT_DECLARED_MODE!:'chat';
+  let declaredWeb=process.env.BOLT_DECLARED_WEB==='1';
+  const declared=()=>{const k=known();return toolsFor(declaredMode,declaredWeb).filter(name=>k.has(name));};
   const names=allowed;
   function apply(next: string){
     mode=next;
+    if(modes.indexOf(next)>modes.indexOf(declaredMode))declaredMode=next;
+    if(webEnabled)declaredWeb=true;
     pi.setActiveTools(stableTools?declared():allowed());
   }
-  const report=(ctx: any)=>ctx.ui.notify('BOLT_STATE:'+JSON.stringify({mode,webEnabled,tools:names()}),'info');
+  const report=(ctx: any)=>ctx.ui.notify('BOLT_STATE:'+JSON.stringify({mode,webEnabled,tools:names(),declaredMode,declaredWeb}),'info');
   pi.on('session_start',()=>apply(mode!));
   pi.registerCommand('bolt-capabilities',{description:'Report app permissions',handler:async(_args: string,ctx: any)=>report(ctx)});
   pi.registerCommand('bolt-web',{description:'Set web access for this chat',handler:async(args:string,ctx:any)=>{
@@ -106,12 +143,14 @@ export default function(pi: any) {
     const listed=stableTools?declared():tools;
     const section='<tools>\n'+(listed.length?listed.map((n: string)=>'- '+n).join('\n'):'(none)')+'\n</tools>';
     const notice=`\n\n<bolt_permissions>Current app permission mode: ${mode}. Available executable tools: ${tools.join(', ')||'none'}. ${mode==='chat'?(webEnabled?'Public web search and page reading are available.':'This is chat only.'):mode==='read'?'File reading and search are allowed.':mode==='ask'?'Use the tools to do the requested work; the app asks before edits or commands.':'The user enabled bypass: use the available tools to complete requested file edits and commands without another permission request.'} Current capabilities supersede earlier assistant statements about unavailable tools. Do not claim a file was saved unless a tool succeeded.</bolt_permissions>`;
-    const rewrite=(s: string)=>s.replace(/<tools>[\s\S]*?<\/tools>/g,section).replace(/\n*<bolt_permissions>[\s\S]*?<\/bolt_permissions>/g,'');
+    // Pi's documentation pointers only help when asking about the harness itself.
+    const rewrite=(s: string)=>s.replace(/<tools>[\s\S]*?<\/tools>/g,section).replace(/\n*<bolt_permissions>[\s\S]*?<\/bolt_permissions>/g,'').replace(/\n*<docs>[\s\S]*?<\/docs>/g,'');
     if(stableTools&&Array.isArray(event.payload?.messages)){
       // The system prompt stays identical; the current permissions go at the end.
       const fixed='\n\n<bolt_permissions>The app decides which of the listed tools may run, and the user can change that during the chat. The <bolt_permission_state> note at the end of the latest message is current and overrides anything earlier. A call to a tool that is not allowed is blocked with a reason. Do not claim a file was saved unless a tool succeeded.</bolt_permissions>';
       const state='\n\n<bolt_permission_state>'+notice.trim().replace(/^<bolt_permissions>|<\/bolt_permissions>$/g,'')+'</bolt_permission_state>';
       const payload={...event.payload,stream:true};
+      if(Array.isArray(payload.tools))payload.tools=payload.tools.map(compactTool);
       if(process.env.BOLT_LLAMA_TIMINGS==='1'){payload.timings_per_token=true;payload.return_progress=true;}
       if(process.env.BOLT_AUTO_OUTPUT==='1'){delete payload.max_tokens;delete payload.max_completion_tokens;delete payload.max_output_tokens;}
       let first=true;
@@ -126,6 +165,7 @@ export default function(pi: any) {
       return payload;
     }
     const payload={...event.payload,stream:true};
+    if(Array.isArray(payload.tools))payload.tools=payload.tools.map(compactTool);
     // llama.cpp servers stream prompt_progress chunks while they read a long prompt.
     if(process.env.BOLT_LLAMA_TIMINGS==='1'&&ctx.model?.provider==='bolt-local'){payload.timings_per_token=true;payload.return_progress=true;}
     if(process.env.BOLT_AUTO_OUTPUT==='1'&&ctx.model?.provider==='bolt-local'){delete payload.max_tokens;delete payload.max_completion_tokens;delete payload.max_output_tokens;}

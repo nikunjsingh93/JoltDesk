@@ -228,7 +228,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
       }
       await fs.writeFile(path.join(isolatedAgentDir,'models.json'),JSON.stringify(registry));const personal=path.join(isolatedAgentDir,'AGENTS.md');if(String(meta.instructions||'').trim())await fs.writeFile(personal,meta.instructions);else await fs.rm(personal,{force:true});await fs.copyFile(path.join(agentDir,'settings.json'),path.join(isolatedAgentDir,'settings.json'));
       const webAccess=native?.webTools?{url:`http://127.0.0.1:${http.address().port}/internal/chats/${chat.id}/web`,key:randomBytes(32).toString('hex'),browser:!!native.browser}:undefined;
-      const rpc=new Rpc({binary:selectedBinary(),cwd,agentDir:isolatedAgentDir,sessionDir,sessionId:chat.id,key:candidate,mode:chat.mode,extension,serverTimings:profile.provider==='local'&&profile.profile!=='generic',autoOutput:profile.provider==='local'&&profile.maxTokens==='auto',webAccess,skills:skillSet,stableTools:profile.provider==='local'});
+      const rpc=new Rpc({binary:selectedBinary(),cwd,agentDir:isolatedAgentDir,sessionDir,sessionId:chat.id,key:candidate,mode:chat.mode,extension,serverTimings:profile.provider==='local'&&profile.profile!=='generic',autoOutput:profile.provider==='local'&&profile.maxTokens==='auto',webAccess,skills:skillSet,stableTools:profile.provider==='local',declared:{mode:chat.declaredMode,web:chat.declaredWeb}});
       rpc.skillKey=skillKey;
       rpc.webKey=webAccess?.key;
       rpc.webPending=0;
@@ -236,7 +236,9 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
       rpc.viewState=makeRuntime(chat);rpc.eventSeq=0;
       rpc.busy=false;
       rpc.on('event',e=>{
-        if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_STATE:')){rpc.capabilities=JSON.parse(e.message.slice(11));audit({type:'permissions',chatId:chat.id,...rpc.capabilities});broadcast(chat.id,{type:'capabilities',...rpc.capabilities});return;}
+        if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_STATE:')){rpc.capabilities=JSON.parse(e.message.slice(11));
+          // Remember the tools this chat has declared so a restarted engine declares the same set.
+          if(rpc.capabilities.declaredMode&&(chat.declaredMode!==rpc.capabilities.declaredMode||!!chat.declaredWeb!==!!rpc.capabilities.declaredWeb)){chat.declaredMode=rpc.capabilities.declaredMode;chat.declaredWeb=!!rpc.capabilities.declaredWeb;save();}audit({type:'permissions',chatId:chat.id,...rpc.capabilities});broadcast(chat.id,{type:'capabilities',...rpc.capabilities});return;}
         if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_REQUEST:')){
           rpc.requestStarted=performance.now();rpc.requestStartedAt=Date.now();rpc.deltaCount=0;rpc.firstDelta=null;rpc.lastDelta=null;rpc.serverTimings=null;rpc.thinkingStart=null;rpc.thinkingMs=0;
           audit({type:'model_request',chatId:chat.id,...JSON.parse(e.message.slice(13))});
