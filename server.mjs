@@ -11,6 +11,7 @@ import { LOCAL_PROVIDER, OPENAI_CONNECTION, normalizeBaseUrl, optionalInteger, c
 import { completedMetrics } from './public/reply-metrics.mjs';
 import {makeRuntime,reduceBackground,collectInspector} from './public/chat-runtime.mjs';
 import { createCheckpoints } from './checkpoints.mjs';
+import * as gitOps from './git.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),vault,native,engineDir,requireBundled=false,autoStartUpdates=true,updateFetcher}={}) {
@@ -369,6 +370,65 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     }
     res.json(result);
   });
+  // Git tab. Commits wait for the chat's agent so they never capture half-written files.
+  const gitChat=req=>{const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)throw new Error('Chat not found');return chat;};
+  app.get('/api/chats/:id/git',async(req,res)=>res.json(await gitOps.status(chatCwd(gitChat(req)))));
+  app.get('/api/chats/:id/git/file',async(req,res)=>res.json(await gitOps.fileChange(chatCwd(gitChat(req)),String(req.query.path||''))));
+  app.post('/api/chats/:id/git/commit',async(req,res)=>{
+    const chat=gitChat(req);
+    if(runners.get(chat.id)?.busy||starting.has(chat.id))throw new Error('Wait for the response to finish before committing.');
+    res.json(await gitOps.commit(chatCwd(chat),{message:req.body.message,paths:req.body.paths}));
+  });
+  app.post('/api/chats/:id/git/push',async(req,res)=>res.json(await gitOps.push(chatCwd(gitChat(req)))));
+  app.post('/api/chats/:id/git/message',async(req,res)=>{
+    const chat=gitChat(req);
+    const summary=await gitOps.changeSummary(chatCwd(chat),req.body.paths);
+    const prompt=[
+      'Write a Git commit message for these changes. Reply with only the message: a summary line in the imperative mood under 72 characters, then, only if useful, a blank line and a short body wrapped at 72 characters. No quotes, Markdown fences or commentary.',
+      '','Branch: '+summary.branch,'Files:',...summary.files,'','Changes:',summary.diff
+    ].join('\n');
+    res.json({message:await oneShot(chat,prompt)});
+  });
+  // Runs one tool-free prompt on the chat's model in a separate engine process,
+  // so nothing is added to the conversation.
+  async function oneShot(chat,prompt){
+    const rpc=await runner(chat);
+    const model=rpc.models.find(m=>m.id===chat.model)||rpc.models[0];
+    if(!model)throw new Error('Connect a model first.');
+    const sessions=path.join(dataDir,'one-shot');await fs.mkdir(sessions,{recursive:true});
+    const sessionId='one-shot-'+randomUUID();
+    const temp=new Rpc({binary:selectedBinary(),cwd:chatCwd(chat),agentDir:path.join(dataDir,'runners',chat.id,'agent'),sessionDir:sessions,sessionId,key:rpc.keySnapshot,mode:'chat',autoOutput:rpc.boundConnection.provider==='local'&&rpc.boundConnection.maxTokens==='auto'});
+    let timer;
+    try{
+      let failure=null;
+      const settled=new Promise((resolve,reject)=>{
+        temp.on('event',e=>{
+          if(e.type==='message_end'&&e.message?.role==='assistant'&&e.message.errorMessage)failure=e.message.errorMessage;
+          if(e.type==='agent_settled')resolve();
+        });
+        temp.on('closed',message=>reject(new Error(message)));
+      });
+      settled.catch(()=>{});
+      await temp.command('get_state');
+      await temp.command('set_model',{provider:model.provider,modelId:model.id});
+      const levels=await temp.command('get_available_thinking_levels').catch(()=>({levels:[]}));
+      const level=['off','minimal','low'].find(l=>levels.levels?.includes(l));
+      if(level)await temp.command('set_thinking_level',{level}).catch(()=>{});
+      await temp.command('prompt',{message:prompt});
+      await Promise.race([settled,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('The model took too long to answer.')),180000);})]);
+      if(failure)throw new Error(failure);
+      const {messages}=await temp.command('get_messages');
+      const reply=messages.findLast(m=>m.role==='assistant');
+      const raw=Array.isArray(reply?.content)?reply.content.filter(c=>c.type==='text').map(c=>c.text).join(''):String(reply?.content||'');
+      const text=raw.replace(/<think>[\s\S]*?<\/think>/g,'').trim().replace(/^```[\w-]*\n?/,'').replace(/\n?```$/,'').trim();
+      if(!text)throw new Error('The model did not return a message.');
+      return text;
+    }finally{
+      clearTimeout(timer);
+      temp.close();
+      for(const file of await fs.readdir(sessions).catch(()=>[]))if(file.includes(sessionId))await fs.rm(path.join(sessions,file),{force:true}).catch(()=>{});
+    }
+  }
   async function inspectorFiles(chat){
     const rpc=runners.get(chat.id);
     if(!rpc)return [];

@@ -1,0 +1,30 @@
+/* Git tab. File rows and diffs reuse the Changes tab styles. */
+:root{--git-width:420px}
+.panel-git .work-panel{width:var(--git-width);min-width:var(--git-width)}
+.git-view{flex:1;min-height:0}
+.git-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.git-head:empty{display:none}
+.git-branch{min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
+.git-branch strong{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.git-branch i{font-style:normal;font-size:10px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.git-branch small{font-size:10px;color:var(--muted)}
+.git-head-actions{display:flex;gap:6px;flex:0 0 auto}
+.git-section-title{margin:12px 0 4px;font-size:10px;letter-spacing:1.3px;text-transform:uppercase;color:var(--muted)}
+.git-section-title label.checkbox{display:flex;align-items:center;gap:8px;margin:0}
+.git-section-title input,.git-file input[type=checkbox]{width:auto;margin:0;accent-color:var(--accent)}
+.git-file .change-file-row{gap:6px}
+.git-code{font-weight:700;min-width:16px;text-align:center}
+.git-M{color:#e2c07a}.git-A,.git-new{color:#8fc98f}.git-D{color:#e99595}.git-R,.git-C{color:#8fb7e9}.git-U{color:#ef9898}
+.light .git-M{color:#9a6b00}.light .git-A,.light .git-new{color:#2f7d32}.light .git-D,.light .git-U{color:#b23b3b}.light .git-R,.light .git-C{color:#2d5f9a}
+.git-commit{margin:14px 0 4px}
+.git-commit textarea{width:100%;min-height:72px;max-height:220px;resize:vertical;padding:9px 10px;font-size:12px;line-height:1.5;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.git-commit textarea:focus{border-color:var(--accent)}
+.git-commit-actions{display:flex;justify-content:space-between;gap:8px;margin-top:8px}
+.git-commit-actions button{padding:6px 11px;font-size:11px}
+.git-primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.git-primary:hover:not(:disabled){background:#e2efca}
+.git-primary:disabled{cursor:default}
+.git-commit-row{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:12px}
+.git-commit-row code{color:var(--accent);font-size:11px}
+.git-commit-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.git-commit-row small{grid-column:2;color:var(--muted);font-size:10px}

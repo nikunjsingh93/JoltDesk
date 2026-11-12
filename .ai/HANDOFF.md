@@ -4,10 +4,11 @@ Updated November 11, 2026 by Claude Code.
 
 ## Current state
 
-The source tree has an uncommitted, unreleased Changes tab for reviewing and undoing agent edits, on top of 0.11.0. JoltDesk 0.11.0 adds a built-in browser as the Browser tab of the right side panel. It is published as the [0.11.0 portable release](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.11.0) for Windows ARM64 and bundles Pi-Bolt bolt-v1.2.1. The app uses the existing bolt mark and reuses existing Bolt Desktop profiles in place.
+The main branch has two unreleased features on top of 0.11.0: a Changes tab for reviewing and undoing agent edits, and a Git tab. Both are committed locally but not pushed. JoltDesk 0.11.0 adds a built-in browser as the Browser tab of the right side panel. It is published as the [0.11.0 portable release](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.11.0) for Windows ARM64 and bundles Pi-Bolt bolt-v1.2.1. The app uses the existing bolt mark and reuses existing Bolt Desktop profiles in place.
 
 ## Recently completed
 
+- Added a **Git** tab (Files | Changes | Git | Browser) for a project chat's repository. It shows the branch, ahead/behind, changed files with checkboxes and diffs against HEAD, and recent commits. **✨ Write message** asks the chat's model through a separate one-shot engine process. Commit includes only the ticked files and waits for the agent to finish. Push or Publish sets the upstream when it is missing. Untracked files show U and conflicts show !. `diff.mjs` now also exports `diffView`, which the Changes and Git tabs share.
 - Added a **Changes** tab to the side panel (Files | Changes | Browser). Each request that used `write` or `edit` is listed with its files, +/− counts, and an expandable line diff. **Undo** restores the request's files, and later requests' edits to them. **Revert** restores one file. Both confirm first and confirm again for outside edits. The agent gets a hidden note on the next prompt. The tab badge counts requests that can still be undone.
 - Added a built-in browser as the **Browser** tab of the right side panel, next to **Files**. It has tabs, back, forward, reload or stop, an address bar that also searches DuckDuckGo, open in the default browser, and **＋ Chat**, which attaches the page text as a Markdown attachment.
 - Links in replies and Sources open in the built-in browser. Ctrl or Shift click opens the default browser.
@@ -18,6 +19,7 @@ The source tree has an uncommitted, unreleased Changes tab for reviewing and und
 
 ## Important files
 
+- `git.mjs` handles status, fileChange, commit, push, and changeSummary. `server.mjs` adds `/api/chats/:id/git`, `/git/file`, `/git/commit`, `/git/push`, and `/git/message`, plus `oneShot()`. `public/git-panel.mjs` and `public/git.css` provide the Git tab.
 - `checkpoints.mjs` stores per-request checkpoints under `<data>/checkpoints/<chatId>/<turnId>.json` and handles begin, snapshot, finish, list, file, restore, and remove. `server.mjs` adds `GET /api/chats/:id/checkpoints`, `GET …/:turn/file?path=`, and `POST …/:turn/restore {path?, force?}`. Restore is refused while the chat is running.
 - `approval.ts` adds the snapshot in `tool_call` and the `bolt-note` command.
 - `public/side-panel.mjs` owns panel tabs (`data-panel-tab` / `data-panel-view`). `public/changes-panel.mjs`, `public/diff.mjs`, and `public/changes.css` provide the Changes tab.
@@ -32,6 +34,7 @@ The source tree has an uncommitted, unreleased Changes tab for reviewing and und
 
 ## Verification
 
+- Git tab: `npm test` passed 31 tests with 0 failures, including `git.test.mjs`. It covers a missing repository, first commit, selective commits with untracked files, renames, deletions, and pushing to a new and an existing upstream. `node test/git-ui-check.mjs` passed with the real engine. It covers the non-repository message, project status, diffs, an AI commit message that leaves the conversation unchanged and includes only the selected files, a selective commit, push, and upstream tracking. The changes, browser, files-web, ui, and parallel UI checks passed again. A screenshot of the Git tab was checked. It is not yet packaged or tested by hand.
 - Changes tab: `npm test` passed 28 tests with 0 failures, including the new `checkpoints.test.mjs` and `diff.test.mjs`. The real-engine `node test/changes-ui-check.mjs` passed. It covers write and edit checkpoints, diffs, file revert, undoing a request together with later ones, the hidden note reaching the model but not the chat, the outside-edit confirmation, and reload. `ui-check`, `files-web-ui-check`, `browser-ui-check`, `parallel-ui-check`, and `project-tree-ui-check` passed. A screenshot of the Changes tab was checked. It is not yet packaged or tested by hand.
 - `npm test`: 21 passed, 1 skipped (the signed real-release check), 0 failed.
 - `node test/browser-ui-check.mjs` passed 4 of 5 runs. The first failure came before the start-up wait was added and has not happened since. The check covers address normalization, tabs, navigation, reading script-rendered text, attachments, load errors, Files/Browser switching, chat-link opening, hiding behind dialogs, and refusing commands from other origins.
@@ -43,7 +46,7 @@ The source tree has an uncommitted, unreleased Changes tab for reviewing and und
 
 ## Next step
 
-Have the user try the Changes tab with a real model, for example with `npm start`. Then bump to 0.12.0, build the ARM64 portable, run the packaged checks, and release. After that, add the Git panel, then the terminal tab.
+Have the user try the Changes and Git tabs with a real model and repository. Then bump to 0.12.0, build the ARM64 portable, run the packaged checks, push `main`, and release. Next feature: a terminal tab.
 
 ## Open work
 

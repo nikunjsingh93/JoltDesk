@@ -14,7 +14,8 @@ JoltDesk is an independent desktop workspace for local and remote AI model APIs.
 | `approval.ts` | App-owned Pi-Bolt extension for permissions, web tool registration, and provider timing |
 | `web-tools.cjs` | Public web search and read-only HTML/text extraction |
 | `checkpoints.mjs`, `public/changes-panel.mjs`, `public/diff.mjs` | Per-request file checkpoints, restore, Myers line diff, and the Changes tab |
-| `public/side-panel.mjs` | Files, Changes, and Browser tabs of the shared right panel |
+| `git.mjs`, `public/git-panel.mjs` | Git status, HEAD and working-tree file contents, selective commit, push, and the Git tab |
+| `public/side-panel.mjs` | Files, Changes, Git, and Browser tabs of the shared right panel |
 | `browser-pane.cjs`, `desktop-preload.cjs`, `public/browser-panel.mjs` | Built-in browser: `WebContentsView` tabs owned by the main process, a preload bridge limited to the app origin, and the Browser tab of the right side panel |
 | `public/` | HTML, CSS and vanilla JavaScript renderer, including chat state and reply metrics |
 | `engine-updater.mjs` and `bundle-engine.mjs` | Verified engine downloads, activation and packaging |
@@ -51,6 +52,9 @@ npm run portable -- --arm64
 - Files, Changes, and Browser share the right side panel. Each tab remembers its own width.
 - Checkpoints: in `approval.ts`, the `tool_call` handler snapshots the exact file bytes as base64 after approval and before `write` or `edit` runs. It sends them as a `BOLT_SNAPSHOT:` notification. Run the snapshot only after approval, so declined calls record nothing. The server opens a checkpoint for each prompt in `rpc.turn` and closes it on `agent_settled`, on the handled disposition, on a prompt error, or when the engine closes. Closing records the after-state and drops files that did not change. Paths are absolute, resolved like the tool does from the chat's working directory. Store bytes, not decoded text, so restores are exact for any encoding.
 - Restoring a request also restores later requests that touched the same files. It compares each file with the last recorded after-state and returns `needsConfirmation` with conflicts instead of overwriting outside edits. After a restore, the next prompt first sends `/bolt-note`, a hidden custom message, so the model knows. The chat renderer ignores custom messages.
+- `git.mjs` runs the `git` CLI with `--literal-pathspecs`, `GIT_TERMINAL_PROMPT=0`, and porcelain v1 `-z` status. Paths are relative to the repository root, so run commands from the root. Commits stage the chosen paths with `--pathspec-from-file`. Do not pass a rename's old path or a staged deletion to `git add`, because they are no longer in the index and `add` fails. Then commit with `--only` for the same paths, so other staged work is left alone. A first commit, with no HEAD yet, cannot use `--only`. `git diff` does not accept `--pathspec-from-file`. Mutations are serialized per repository.
+- `oneShot()` in `server.mjs` sends a single tool-free prompt to the chat's model through a temporary Pi-Bolt process. It uses the chat's runner agent directory and a throwaway session in `<data>/one-shot`, so nothing enters the conversation. The Git tab uses it for commit messages.
+- UI checks that use a folder under `work/` must set `GIT_CEILING_DIRECTORIES`, or Git finds the JoltDesk checkout.
 - Command tools (`bash`, `powershell`) are recorded only as "commands ran". Their file effects are not tracked.
 - Keep the app’s MIT license separate from Pi-Bolt and other bundled notices. Preserve the signed engine bundle’s notices and provenance in distributions.
 

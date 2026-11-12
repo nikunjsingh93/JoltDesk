@@ -49,6 +49,7 @@
       "engine-updater.mjs",
       "connections.mjs",
       "checkpoints.mjs",
+      "git.mjs",
       "web-tools.cjs",
       "browser-pane.cjs",
       "desktop-preload.cjs",

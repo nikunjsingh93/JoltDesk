@@ -76,3 +76,30 @@ export function countChanges(rows){
   for(const row of rows){if(row.type==='add')added++;else if(row.type==='del')removed++;}
   return {added,removed};
 }
+
+const escapeHtml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const MAX_RENDERED_ROWS=4000;
+function bytesOf(base64){
+  if(typeof atob!=='function')return Buffer.from(base64,'base64');
+  const raw=atob(base64),bytes=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
+  return bytes;
+}
+
+// Renders before/after file states ({exists, tracked, data: base64}) as diff HTML.
+export function diffView(before,after){
+  const empty=text=>({html:`<p class="inspector-empty">${text}</p>`,stats:null});
+  if(!before.tracked||!after.tracked)return empty('This file is too large to show.');
+  const bytes=[before.data,after.data].map(d=>d?bytesOf(d):new Uint8Array());
+  if(bytes.some(b=>b.includes(0)))return empty('Binary file changed.');
+  const [a,b]=bytes.map(d=>new TextDecoder().decode(d));
+  const rows=diffLines(a,b),stats=countChanges(rows),parts=hunks(rows);
+  if(!parts.length)return {...empty('No line changes.'),stats};
+  let shown=0;
+  const html=parts.map(h=>{
+    if(shown>MAX_RENDERED_ROWS)return '';
+    shown+=h.lines.length;
+    return `<div class="hunk-head">@@ −${h.oldStart} +${h.newStart} @@</div>`+h.lines.map(l=>`<div class="diff-line ${l.type}"><span class="ln">${l.old??''}</span><span class="ln">${l.new??''}</span><span class="mark">${l.type==='add'?'+':l.type==='del'?'−':' '}</span><code>${escapeHtml(l.text)||' '}</code></div>`).join('');
+  }).join('')+(shown>MAX_RENDERED_ROWS?'<p class="inspector-empty">Diff truncated. Open the file to see the rest.</p>':'');
+  return {html,stats};
+}

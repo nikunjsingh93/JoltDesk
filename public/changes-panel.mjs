@@ -1,13 +1,10 @@
 // Changes tab: per-request file diffs recorded by the server, with undo.
-import {diffLines,hunks,countChanges} from './diff.mjs';
+import {diffView} from './diff.mjs';
 import {panelMode} from './side-panel.mjs';
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const decode=data=>data?new TextDecoder().decode(bytesOf(data)):'';
-function bytesOf(base64){const raw=atob(base64);const bytes=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);return bytes;}
 const when=ms=>{const date=new Date(ms);return date.toDateString()===new Date().toDateString()?date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):date.toLocaleDateString([],{month:'short',day:'numeric'})+' '+date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});};
-const MAX_RENDERED_ROWS=4000;
 
 export function initChangesPanel({api,toast,currentChat,isRunning}){
   const list=$('#changes-list'),count=$('#changes-count');
@@ -62,22 +59,7 @@ export function initChangesPanel({api,toast,currentChat,isRunning}){
     const [turn,file]=key.split('\n');
     try{
       const result=await api(`/chats/${chatId}/checkpoints/${encodeURIComponent(turn)}/file?path=${encodeURIComponent(file)}`);
-      const binary=[result.before.data,result.after.data].some(d=>d&&bytesOf(d).includes(0));
-      let html,stats;
-      if(!result.before.tracked||!result.after.tracked)html='<p class="inspector-empty">This file was too large to track.</p>';
-      else if(binary)html='<p class="inspector-empty">Binary file changed.</p>';
-      else{
-        const rows=diffLines(decode(result.before.data),decode(result.after.data));
-        stats=countChanges(rows);
-        const parts=hunks(rows);
-        let shown=0;
-        html=parts.length?parts.map(h=>{
-          if(shown>MAX_RENDERED_ROWS)return '';
-          shown+=h.lines.length;
-          return `<div class="hunk-head">@@ −${h.oldStart} +${h.newStart} @@</div>`+h.lines.map(l=>`<div class="diff-line ${l.type}"><span class="ln">${l.old??''}</span><span class="ln">${l.new??''}</span><span class="mark">${l.type==='add'?'+':l.type==='del'?'−':' '}</span><code>${esc(l.text)||' '}</code></div>`).join('');
-        }).join('')+(shown>MAX_RENDERED_ROWS?'<p class="inspector-empty">Diff truncated. Open the file to see the rest.</p>':''):'<p class="inspector-empty">No line changes.</p>';
-      }
-      diffs.set(key,{html,stats});
+      diffs.set(key,diffView(result.before,result.after));
     }catch(error){diffs.set(key,{html:`<p class="inspector-empty">${esc(error.message)}</p>`});}
     if(open.has(key))render();
   }

@@ -24,6 +24,10 @@ Screenshots use a demo workspace and simulated model connections.
 
 ![JoltDesk settings showing both a local Qwen API and an OpenAI API marked connected](docs/screenshots/connections.png)
 
+## Git tab (unreleased)
+
+The side panel's **Git** tab shows the Git repository for a project chat's folder: the branch, whether it is ahead of or behind its upstream, the changed files, and the most recent commits. Click a file to see its diff against the last commit. Tick the files to include, then write a message or click **✨ Write message** to have the chat's model write one from the selected changes. That request runs separately and does not appear in the conversation. **Commit** commits only the ticked files. **Push** sends commits to the upstream branch, and **Publish** pushes a new branch and sets its upstream. JoltDesk uses the `git` command on your PATH with your existing Git identity and credentials. Commits wait until the chat's reply finishes.
+
 ## Review and undo agent changes (unreleased)
 
 The side panel has a **Changes** tab next to **Files** and **Browser**. Every request that edits files appears there with the files it changed and their added and removed line counts. Click a file to see a line diff.
