@@ -4,7 +4,7 @@ A standalone desktop GUI with **Pi-Bolt built in**, connected through its stream
 
 ## Run on Windows ARM64
 
-1. Open **JoltDesk-0.13.0-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
+1. Open **JoltDesk-0.13.1-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
 2. Open **Settings & connection**, select OpenAI or Local / OpenAI-compatible API, enter connection details, and click **Connect & discover models**.
 3. Pick a model and start chatting. No manual `models.json` changes, terminal commands, or Node installation are needed for the portable build.
 
