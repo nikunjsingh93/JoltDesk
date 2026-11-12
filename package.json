@@ -51,6 +51,7 @@
       "checkpoints.mjs",
       "git.mjs",
       "terminal.mjs",
+      "skills.mjs",
       "web-tools.cjs",
       "browser-pane.cjs",
       "desktop-preload.cjs",

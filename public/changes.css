@@ -52,3 +52,38 @@
 #projects .project-actions{width:24px;flex:0 0 24px;justify-content:center;padding:5px 2px;font-size:16px}
 #projects .project-actions:hover{color:var(--text)}
 #remove-project-dialog code{font-size:11px;overflow-wrap:anywhere}
+/* Skills (Files tab, Settings and "/" suggestions). */
+.skill-row{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)}
+.skill-row input[type=checkbox]{width:auto;margin:3px 0 0;accent-color:var(--accent)}
+.skill-row.inactive .skill-title{opacity:.6}
+.skill-text{flex:1;min-width:0}
+.skill-title{display:flex;align-items:center;gap:6px;min-width:0}
+.skill-open{border:0;padding:0;font-size:12px;color:var(--accent);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.skill-open:hover{background:none;text-decoration:underline}
+.skill-name{font-size:12px}
+.skill-title i{font-style:normal;font-size:9px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.skill-title i.skill-problem{color:#e99595;border-color:#a6505066}
+.skill-text small{display:block;margin-top:2px;font-size:10px;line-height:1.5;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.skill-remove{padding:3px 8px;font-size:10px;flex:0 0 auto}
+.skill-group{display:flex;align-items:center;justify-content:space-between;margin:12px 0 2px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.skill-link{border:0;padding:0;font-size:10px;color:var(--muted);text-transform:none;letter-spacing:0}
+.skill-link:hover{background:none;color:var(--text);text-decoration:underline}
+.skill-trust{margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.skill-trust p{margin:0 0 8px;font-size:11px;line-height:1.6;color:var(--muted)}
+.skill-trust button{padding:5px 10px;font-size:11px;color:var(--accent)}
+.skills-settings{margin:20px 0 8px;padding-top:12px;border-top:1px solid var(--line)}
+.skills-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12px;margin-bottom:6px}
+.skills-actions{display:flex;gap:6px;flex-wrap:wrap}
+.skills-actions button{padding:5px 9px;font-size:11px}
+.skills-actions button[hidden]{display:none}
+.new-skill-form{margin:8px 0 10px;padding:10px;border:1px solid var(--line);border-radius:8px}
+.new-skill-form input{padding:7px 9px;font-size:12px;font-family:Consolas,monospace}
+.new-skill-form textarea{display:block;width:100%;margin-top:8px;padding:7px 9px;font-size:12px;line-height:1.5;border:1px solid var(--line);border-radius:8px;resize:vertical}
+#skills-feedback{display:block;font-size:11px;color:var(--accent);margin-top:6px}
+.composer{position:relative}
+.slash-menu{position:absolute;left:10px;right:10px;bottom:calc(100% + 6px);z-index:15;padding:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);max-height:280px;overflow:auto}
+.slash-menu[hidden]{display:none}
+.slash-item{display:flex;align-items:baseline;gap:10px;padding:7px 9px;border-radius:7px;cursor:pointer;min-width:0}
+.slash-item.active,.slash-item:hover{background:var(--panel2)}
+.slash-item code{font-size:12px;color:var(--accent);white-space:nowrap}
+.slash-item small{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

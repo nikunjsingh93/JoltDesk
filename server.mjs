@@ -13,6 +13,7 @@ import {makeRuntime,reduceBackground,collectInspector} from './public/chat-runti
 import { createCheckpoints } from './checkpoints.mjs';
 import * as gitOps from './git.mjs';
 import { createTerminals } from './terminal.mjs';
+import { listSkills, projectSkillRoots, createSkill, importSkill, removeSkill } from './skills.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),vault,native,engineDir,requireBundled=false,autoStartUpdates=true,updateFetcher}={}) {
@@ -155,8 +156,9 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     if(engine?.state.installing)throw new Error('The engine is updating. Try again when it finishes.');
     const profile=chat.connectionId?meta.connections.find(c=>c.id===chat.connectionId):{...connection,models};
     if(!profile)throw new Error('This chat’s API was removed. Select another API to continue.');
+    const skillSet=(await chatSkills(chat)).selected,skillKey=skillSet.join('|');
     const existing=runners.get(chat.id);
-    if(existing&&(existing.busy||(existing.boundConnection.id===profile.id&&existing.profileRevision===(profile.revision||0)&&existing.instructionsRevision===(meta.instructionsRevision||0))))return existing;
+    if(existing&&(existing.busy||(existing.boundConnection.id===profile.id&&existing.profileRevision===(profile.revision||0)&&existing.instructionsRevision===(meta.instructionsRevision||0)&&existing.skillKey===skillKey)))return existing;
     if(existing){existing.close();runners.delete(chat.id);}
     if(starting.has(chat.id))return starting.get(chat.id);
     const promise=(async()=>{
@@ -178,7 +180,8 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
       }
       await fs.writeFile(path.join(isolatedAgentDir,'models.json'),JSON.stringify(registry));const personal=path.join(isolatedAgentDir,'AGENTS.md');if(String(meta.instructions||'').trim())await fs.writeFile(personal,meta.instructions);else await fs.rm(personal,{force:true});await fs.copyFile(path.join(agentDir,'settings.json'),path.join(isolatedAgentDir,'settings.json'));
       const webAccess=native?.webTools?{url:`http://127.0.0.1:${http.address().port}/internal/chats/${chat.id}/web`,key:randomBytes(32).toString('hex'),browser:!!native.browser}:undefined;
-      const rpc=new Rpc({binary:selectedBinary(),cwd,agentDir:isolatedAgentDir,sessionDir,sessionId:chat.id,key:candidate,mode:chat.mode,extension,serverTimings:profile.provider==='local'&&profile.profile!=='generic',autoOutput:profile.provider==='local'&&profile.maxTokens==='auto',webAccess});
+      const rpc=new Rpc({binary:selectedBinary(),cwd,agentDir:isolatedAgentDir,sessionDir,sessionId:chat.id,key:candidate,mode:chat.mode,extension,serverTimings:profile.provider==='local'&&profile.profile!=='generic',autoOutput:profile.provider==='local'&&profile.maxTokens==='auto',webAccess,skills:skillSet});
+      rpc.skillKey=skillKey;
       rpc.webKey=webAccess?.key;
       rpc.webPending=0;
       rpc.boundConnection={...profile};rpc.instructionsRevision=meta.instructionsRevision||0;rpc.models=profileModels;rpc.profileRevision=profile.revision||0;rpc.keySnapshot=candidate;
@@ -507,6 +510,64 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   app.post('/api/chats/:id/terminal/clear',async(req,res)=>{terminals.clear(terminalChat(req).id);res.json({ok:true});});
   app.post('/api/chats/:id/terminal/:entry/input',async(req,res)=>{terminals.input(terminalChat(req).id,req.params.entry,req.body.text??'');res.json({ok:true});});
   app.post('/api/chats/:id/terminal/:entry/stop',async(req,res)=>{terminals.stop(terminalChat(req).id,req.params.entry);res.json({ok:true});});
+  // Skills. Personal skills live in <data>/skills. A project's skills load only
+  // after the user turns them on for that project.
+  const personalSkills=path.join(dataDir,'skills');
+  async function chatSkills(chat){
+    const project=meta.projects.find(p=>p.id===chat?.projectId);
+    return listSkills({personalDir:personalSkills,projectDir:project?.path,projectEnabled:!!project?.skillsEnabled,disabled:meta.disabledSkills||[]});
+  }
+  async function skillById(id,chat){
+    const {skills}=await chatSkills(chat);
+    const skill=skills.find(s=>s.id===id);
+    if(!skill)throw new Error('This skill is not available.');
+    return skill;
+  }
+  const skillChat=req=>req.query.chat||req.body?.chat?meta.chats.find(c=>c.id===(req.query.chat||req.body.chat)):null;
+  app.get('/api/skills',async(req,res)=>{
+    const chat=skillChat(req),project=meta.projects.find(p=>p.id===chat?.projectId);
+    const {skills}=await chatSkills(chat);
+    const projectFound=project?(await projectSkillRoots(project.path)).length>0:false;
+    res.json({personalDir:personalSkills,skills,project:project?{id:project.id,name:project.name,enabled:!!project.skillsEnabled,found:projectFound}:null});
+  });
+  app.post('/api/skills',async(req,res)=>{
+    const dir=await createSkill(personalSkills,{name:req.body.name,description:req.body.description});
+    if(native?.fileAction)await native.fileAction('open',path.join(dir,'SKILL.md')).catch(()=>{});
+    res.json({id:dir});
+  });
+  app.post('/api/skills/import',async(req,res)=>{
+    let source=typeof req.body.path==='string'?req.body.path:'';
+    if(!source){
+      if(!native?.pickFolder)throw new Error('Enter the path of a skill folder to import.');
+      source=await native.pickFolder();
+      if(!source)return res.json({cancelled:true});
+    }
+    res.json({id:await importSkill(personalSkills,source)});
+  });
+  app.post('/api/skills/toggle',async(req,res)=>{
+    const skill=await skillById(String(req.body.id||''),skillChat(req));
+    const off=new Set(meta.disabledSkills||[]);
+    if(req.body.enabled===false)off.add(skill.id);else off.delete(skill.id);
+    meta.disabledSkills=[...off];await save();res.json({ok:true});
+  });
+  app.post('/api/skills/open',async(req,res)=>{
+    if(!native?.fileAction)throw new Error('Opening files is available in the desktop app.');
+    if(req.body.folder===true){await fs.mkdir(personalSkills,{recursive:true});await native.fileAction('open',personalSkills);return res.json({ok:true});}
+    const skill=await skillById(String(req.body.id||''),skillChat(req));
+    await native.fileAction(req.body.action==='reveal'?'reveal':'open',skill.file);
+    res.json({ok:true});
+  });
+  app.post('/api/skills/remove',async(req,res)=>{
+    const skill=await skillById(String(req.body.id||''),null);
+    await removeSkill(personalSkills,skill.id,path.join(dataDir,'trash','skills'));
+    meta.disabledSkills=(meta.disabledSkills||[]).filter(id=>id!==skill.id);await save();
+    res.json({ok:true});
+  });
+  app.post('/api/projects/:id/skills',async(req,res)=>{
+    const project=meta.projects.find(p=>p.id===req.params.id);if(!project)throw new Error('Project not found');
+    project.skillsEnabled=req.body.enabled===true;await save();
+    res.json({enabled:project.skillsEnabled});
+  });
   async function inspectorFiles(chat){
     const rpc=runners.get(chat.id);
     if(!rpc)return [];

@@ -14,7 +14,7 @@ export function findBinary(override) {
 }
 
 export class Rpc extends EventEmitter {
-  constructor({binary, cwd, agentDir, sessionDir, sessionId, key, mode='chat', extension,serverTimings=false,autoOutput=false,webAccess}) {
+  constructor({binary, cwd, agentDir, sessionDir, sessionId, key, mode='chat', extension,serverTimings=false,autoOutput=false,webAccess,skills=[]}) {
     super(); this.pending = new Map(); this.buffer = ''; this.diagnostics = ''; this.closed = false;
     const args = ['--mode','rpc','--no-extensions','--no-skills','--no-prompt-templates','--no-mcp',
       '--session-dir',sessionDir,'--session-id',sessionId];
@@ -30,6 +30,8 @@ export class Rpc extends EventEmitter {
     else if(mode === 'read') args.push('--tools','read,grep,find,ls');
     else args.push('--tools',process.platform === 'win32' ? 'read,write,edit,bash,powershell,grep,find,ls' : 'read,write,edit,bash,grep,find,ls');
     if(extension) args.push('-e', extension);
+    // Discovery stays off; only skills the app selected are loaded.
+    for(const skill of skills) args.push('--skill', skill);
     this.child = spawn(binary,args,{cwd,windowsHide:true,env:{...process.env,PI_CODING_AGENT_DIR:agentDir,
       OPENAI_API_KEY:key || 'discovery-only-no-api-key', BOLT_LOCAL_API_KEY:key||'local-no-key', BOLT_PERMISSION_MODE:mode, BOLT_LLAMA_TIMINGS:serverTimings?'1':'0', BOLT_AUTO_OUTPUT:autoOutput?'1':'0', BOLT_WEB_URL:webAccess?.url||'', BOLT_WEB_KEY:webAccess?.key||'', BOLT_BROWSER:webAccess?.browser?'1':'0', PI_OFFLINE:'1', PI_TELEMETRY:'0'}});
     this.child.stdout.setEncoding('utf8');

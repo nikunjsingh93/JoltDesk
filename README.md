@@ -24,6 +24,14 @@ Screenshots use a demo workspace and simulated model connections.
 
 ![JoltDesk settings showing both a local Qwen API and an OpenAI API marked connected](docs/screenshots/connections.png)
 
+## Skills (unreleased)
+
+A skill is a folder with a `SKILL.md` file that teaches the agent a specific task, using the open [Agent Skills](https://agentskills.io/specification) format. The agent sees each skill's name and description, and reads the full instructions only when a request matches. Type `/` in the message box to pick a skill, or type `/skill:name` followed by details to run one directly.
+
+- **Personal skills** apply to every chat. Manage them in **Settings → Skills**: **＋ New skill** writes a starter `SKILL.md`, **Import folder…** copies a skill folder into JoltDesk, **Open folder** shows where they live, and each skill can be turned off or removed. Removed skills move to JoltDesk's trash folder.
+- **Project skills** in a project's `.agents/skills`, `.claude/skills`, or `.pi/skills` folder are off until you choose **Use project skills** in the Files tab, because they can tell the agent to run scripts.
+- The Files tab lists the skills a chat can use. Automatic use needs **Read files** or a higher permission. `/skill:name` works in every mode.
+
 ## Coding tools in 0.12
 
 0.12 adds the Changes, Git, and Terminal tabs and instruction files, described below. To remove a project, open its **⋯** menu in the sidebar and choose **Remove project**. This removes the project and its chats from JoltDesk and archives the chats in JoltDesk's trash folder. The project folder and its files are not changed. A project cannot be removed while one of its chats is replying.

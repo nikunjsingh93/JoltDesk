@@ -6,12 +6,13 @@ import {initChangesPanel} from './changes-panel.mjs';
 import {initGitPanel} from './git-panel.mjs';
 import {initInstructions} from './instructions.mjs';
 import {initTerminalPanel} from './terminal-panel.mjs';
+import {initSkills} from './skills-panel.mjs';
 import {makeRuntime,reduceBackground,trackTool,collectInspector,updateThinking} from './chat-runtime.mjs';
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let config, current, projectId=null, ws, files=[], messages=[], streaming=null, running=false, started=0, chars=0, usage={}, stats={}, approval, generation=0, finalSeconds=0,followChat=true;
 const toolNodes=new Map();
 const chatStates=new Map();
-let changesPanel=null,gitPanel=null,instructionsPanel=null,terminalPanel=null;
+let changesPanel=null,gitPanel=null,instructionsPanel=null,terminalPanel=null,skillsPanel=null;
 function saveCurrentState(){if(!current)return;const s=chatStates.get(current.id);if(!s)return;Object.assign(s,{chat:current,messages,streaming,running,started,chars,usage,stats,finalSeconds,ws,files,draft:$('#prompt').value,followChat,stage:$('#activity-text').textContent,approval});}
 function parkActivity(){const activity=$('#activity');if(activity)$('#activity-parking').append(activity);}
 function mountActivity(message){
@@ -326,7 +327,7 @@ function renderChat(){
   $('#web-tools').checked=!!current?.webEnabled;
   $('#file-menu').hidePopover();
   renderModels();
-  if(streaming)mountActivity(streaming);else if(running)mountActivity(messages.findLast(m=>m.role==='assistant'));renderInspector();changesPanel?.refresh();gitPanel?.refresh();instructionsPanel?.refresh();terminalPanel?.refresh();
+  if(streaming)mountActivity(streaming);else if(running)mountActivity(messages.findLast(m=>m.role==='assistant'));renderInspector();changesPanel?.refresh();gitPanel?.refresh();instructionsPanel?.refresh();terminalPanel?.refresh();skillsPanel?.refresh();
 }
 function scrollBottom(){const area=$('#scroll-area');if(followChat)area.scrollTop=area.scrollHeight;}
 $('#scroll-area').addEventListener('scroll',e=>{followChat=atScrollEnd(e.currentTarget);});
@@ -653,6 +654,7 @@ const browser=initBrowserPanel({toast,showPanel:()=>setInspector(true),onAttach:
 changesPanel=initChangesPanel({api,toast,currentChat:()=>current,isRunning:()=>running});
 gitPanel=initGitPanel({api,toast,currentChat:()=>current,isRunning:()=>running});
 terminalPanel=initTerminalPanel({api,toast,currentChat:()=>current,abortAgent:()=>{if(ws?.readyState===1)ws.send(JSON.stringify({type:'abort'}));}});
+skillsPanel=initSkills({api,toast,currentChat:()=>current,getConfig:()=>config});
 instructionsPanel=initInstructions({api,toast,currentChat:()=>current,getConfig:()=>config,setConfig:value=>{config=value;}});
 initSidePanel({browser:browser.available});
 // Links in replies and sources open in the built-in browser. Ctrl or Shift click uses the default browser.
@@ -661,4 +663,6 @@ document.addEventListener('click',e=>{
   if(!link||!browser.available||e.ctrlKey||e.shiftKey||e.metaKey||!/^https?:/i.test(link.href))return;
   e.preventDefault();browser.open(link.href);
 });
+// Startup buttons stay disabled until their handlers are attached and the workspace has loaded.
 try{config=await api('/config');renderSidebar();renderChat();updateMetrics();}catch(e){toast(e.message);}
+finally{document.querySelectorAll('[data-startup]').forEach(button=>button.disabled=false);}
