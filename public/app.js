@@ -427,6 +427,7 @@ function onEvent(e){
     updateMetrics();
   }
   if(e.type==='message_end'&&e.message?.role==='assistant'){
+    rememberPrefill(e.replyMetrics?.serverTimings);
     usage=e.message.usage||usage;
     if(streaming?.el){Object.assign(streaming,e.message,{live:false,isThinking:false,replyMetrics:e.replyMetrics});updateStreamNode(streaming);}
     else{const m={...e.message,replyMetrics:e.replyMetrics};messages.push(m);$('#messages').append(messageNode(m));}streaming=null;$('#activity-text').textContent=e.message.stopReason==='toolUse'?'Preparing tools…':'Finishing…';scrollBottom();
@@ -550,7 +551,47 @@ $('#install-engine').onclick=async()=>{
 setInterval(refreshEngine,15000);setInterval(()=>{if($('#settings-dialog').open||config?.engine?.installing)refreshEngine();},1500);
 setInterval(()=>{if($('#settings-dialog').open)refreshConnectionStatuses();},30000);
 $('#disconnect').onclick=async()=>{try{config=await api('/disconnect',{});renderModels();$('#settings-feedback').textContent='Disconnected. Saved key removed.';}catch(e){toast(e.message);}};
-$('#model').onchange=async()=>{try{const option=$('#model').selectedOptions[0];if(option?.dataset.connectionId&&option.dataset.connectionId!==config.connection?.id){await useConnection(option.dataset.connectionId,option.dataset.modelId);return;}renderThinking();updateMetrics();config.preferredModel=$('#model').value;await api('/model',{modelId:$('#model').value});if(current){await patchChat({model:$('#model').value,connectionId:config.connection.id});ws?.send(JSON.stringify({type:'levels'}));}}catch(e){toast(e.message);renderModels();}};
+// Asks for confirmation in a dialog and resolves to true when the user confirms.
+function confirmAction({title,message,note='',confirm,cancel='Cancel'}){
+  const dialog=$('#confirm-dialog');
+  $('#confirm-title').textContent=title;$('#confirm-message').textContent=message;$('#confirm-note').textContent=note;
+  $('#confirm-ok').textContent=confirm;$('#confirm-cancel').textContent=cancel;
+  return new Promise(resolve=>{
+    const finish=value=>{dialog.removeEventListener('close',closed);$('#confirm-ok').onclick=$('#confirm-cancel').onclick=null;if(dialog.open)dialog.close();resolve(value);};
+    const closed=()=>finish(false);
+    dialog.addEventListener('close',closed);
+    $('#confirm-ok').onclick=()=>finish(true);$('#confirm-cancel').onclick=()=>finish(false);
+    dialog.showModal();$('#confirm-cancel').focus();
+  });
+}
+// Prompt-processing speed measured per model, used to estimate a full reprocess.
+const prefillKey=(connectionId,modelId)=>'joltdesk-prefill:'+connectionId+'::'+modelId;
+function rememberPrefill(timings){
+  if(!current||!timings||!(timings.prompt_n>=500)||!(timings.prompt_per_second>0))return;
+  try{localStorage.setItem(prefillKey(current.connectionId||config.connection?.id,current.model),String(timings.prompt_per_second));}catch{}
+}
+const knownPrefill=(connectionId,modelId)=>{try{return Number(localStorage.getItem(prefillKey(connectionId,modelId)))||null;}catch{return null;}};
+const roughTime=seconds=>seconds<90?`about ${Math.max(10,Math.round(seconds/10)*10)} seconds`:seconds<5400?`about ${Math.round(seconds/60)} minutes`:`about ${(seconds/3600).toFixed(1)} hours`;
+// Switching a long chat to another local model reprocesses the whole conversation,
+// because each model keeps its own prompt cache. Say so before switching.
+async function confirmModelSwitch(option){
+  const fromConnection=current?.connectionId||config.connection?.id,toConnection=option?.dataset.connectionId||config.connection?.id;
+  const toModel=option?.dataset.modelId||option?.value;
+  if(!current||running||!toModel||(toConnection===fromConnection&&toModel===current.model))return true;
+  if((config.connections||[]).find(c=>c.id===toConnection)?.provider!=='local')return true;
+  const tokens=Number(stats.contextUsage?.tokens||0);
+  if(tokens<4000)return true;
+  const speed=knownPrefill(toConnection,toModel),name=option.textContent.trim();
+  const estimate=speed?` At the ${Math.round(speed)} tokens per second measured for this model, that takes ${roughTime(tokens/speed)}.`:'';
+  return confirmAction({
+    title:'Switch model in this chat?',
+    message:`${name} will process this whole conversation again, about ${Math.round(tokens/100)*100 >= 1000?Math.round(tokens/1000).toLocaleString()+'K':tokens.toLocaleString()} tokens, before it answers.${estimate}`,
+    note:'Each model keeps its own cache, so the first message after a switch is slow. Starting a new chat with that model avoids this.',
+    confirm:'Switch model',cancel:'Keep current model'
+  });
+}
+$('#model').onchange=async()=>{try{const option=$('#model').selectedOptions[0];
+  if(!await confirmModelSwitch(option)){renderModels();return;}if(option?.dataset.connectionId&&option.dataset.connectionId!==config.connection?.id){await useConnection(option.dataset.connectionId,option.dataset.modelId);return;}renderThinking();updateMetrics();config.preferredModel=$('#model').value;await api('/model',{modelId:$('#model').value});if(current){await patchChat({model:$('#model').value,connectionId:config.connection.id});ws?.send(JSON.stringify({type:'levels'}));}}catch(e){toast(e.message);renderModels();}};
 $('#add-api').onclick=()=>{editConnection({provider:'local',maxTokens:'auto'},true);$('#settings-feedback').textContent='Add another API. Your saved connections will stay.';};
 $('#connection-editor').onchange=()=>editConnection(config.connections.find(c=>c.id===$('#connection-editor').value)||{provider:'local',maxTokens:'auto'});
 $('#auto-output-tokens').onchange=()=>{$('#max-output-tokens').disabled=$('#auto-output-tokens').checked;};

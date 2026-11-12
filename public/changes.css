@@ -90,3 +90,7 @@
 /* Version next to the sidebar title. */
 .app-version{align-self:flex-end;margin:0 0 6px -3px;font-size:10px;font-weight:500;letter-spacing:0;color:var(--muted)}
 .sidebar-hidden .app-version{display:none}
+/* Generic confirmation dialog. */
+.confirm-note{font-size:11px}
+.primary-inline{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.primary-inline:hover{background:#e2efca}

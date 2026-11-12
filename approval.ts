@@ -75,12 +75,18 @@ export default function(pi: any) {
       });
     }
   }
-  const names=()=>pi.getActiveTools();
+  // Local model servers cache the processed prompt by its prefix. For them every tool
+  // stays declared in a fixed order and the system prompt never changes, so toggling
+  // Web or permissions does not force the whole conversation to be processed again.
+  // Permissions are enforced when a tool is called instead.
+  const stableTools=process.env.BOLT_STABLE_TOOLS==='1';
+  const known=()=>new Set(pi.getAllTools().map((t: any)=>t.name));
+  const allowed=()=>{const k=known();return [...(mode==='chat'?[]:mode==='read'?readTools:fullTools),...(webEnabled?webTools:[])].filter(name=>k.has(name));};
+  const declared=()=>{const k=known();return [...fullTools,...webTools].filter(name=>k.has(name));};
+  const names=allowed;
   function apply(next: string){
     mode=next;
-    const known=new Set(pi.getAllTools().map((t: any)=>t.name));
-    const local=mode==='chat'?[]:mode==='read'?readTools:fullTools;
-    pi.setActiveTools([...local,...(webEnabled?webTools:[])].filter(name=>known.has(name)));
+    pi.setActiveTools(stableTools?declared():allowed());
   }
   const report=(ctx: any)=>ctx.ui.notify('BOLT_STATE:'+JSON.stringify({mode,webEnabled,tools:names()}),'info');
   pi.on('session_start',()=>apply(mode!));
@@ -97,9 +103,28 @@ export default function(pi: any) {
   }});
   pi.on('before_provider_request',(event: any,ctx: any)=>{
     const tools=names();
-    const section='<tools>\n'+(tools.length?tools.map((n: string)=>'- '+n).join('\n'):'(none)')+'\n</tools>';
+    const listed=stableTools?declared():tools;
+    const section='<tools>\n'+(listed.length?listed.map((n: string)=>'- '+n).join('\n'):'(none)')+'\n</tools>';
     const notice=`\n\n<bolt_permissions>Current app permission mode: ${mode}. Available executable tools: ${tools.join(', ')||'none'}. ${mode==='chat'?(webEnabled?'Public web search and page reading are available.':'This is chat only.'):mode==='read'?'File reading and search are allowed.':mode==='ask'?'Use the tools to do the requested work; the app asks before edits or commands.':'The user enabled bypass: use the available tools to complete requested file edits and commands without another permission request.'} Current capabilities supersede earlier assistant statements about unavailable tools. Do not claim a file was saved unless a tool succeeded.</bolt_permissions>`;
     const rewrite=(s: string)=>s.replace(/<tools>[\s\S]*?<\/tools>/g,section).replace(/\n*<bolt_permissions>[\s\S]*?<\/bolt_permissions>/g,'');
+    if(stableTools&&Array.isArray(event.payload?.messages)){
+      // The system prompt stays identical; the current permissions go at the end.
+      const fixed='\n\n<bolt_permissions>The app decides which of the listed tools may run, and the user can change that during the chat. The <bolt_permission_state> note at the end of the latest message is current and overrides anything earlier. A call to a tool that is not allowed is blocked with a reason. Do not claim a file was saved unless a tool succeeded.</bolt_permissions>';
+      const state='\n\n<bolt_permission_state>'+notice.trim().replace(/^<bolt_permissions>|<\/bolt_permissions>$/g,'')+'</bolt_permission_state>';
+      const payload={...event.payload,stream:true};
+      if(process.env.BOLT_LLAMA_TIMINGS==='1'){payload.timings_per_token=true;payload.return_progress=true;}
+      if(process.env.BOLT_AUTO_OUTPUT==='1'){delete payload.max_tokens;delete payload.max_completion_tokens;delete payload.max_output_tokens;}
+      let first=true;
+      payload.messages=payload.messages.map((m: any)=>{if(m.role!=='system'&&m.role!=='developer')return m;if(typeof m.content!=='string')return m;const content=rewrite(m.content)+(first?fixed:'');first=false;return {...m,content};});
+      if(first)payload.messages.unshift({role:'system',content:section+fixed});
+      const last=payload.messages.length-1,tail=payload.messages[last];
+      if(tail&&tail.role!=='system'&&tail.role!=='developer'){
+        const content=typeof tail.content==='string'?tail.content+state:Array.isArray(tail.content)?[...tail.content,{type:'text',text:state.trim()}]:state.trim();
+        payload.messages[last]={...tail,content};
+      }
+      ctx.ui.notify('BOLT_REQUEST:'+JSON.stringify({mode,tools,stream:payload.stream,declaredTools:(payload.tools||[]).map((t: any)=>t.function?.name||t.name).filter(Boolean)}),'info');
+      return payload;
+    }
     const payload={...event.payload,stream:true};
     // llama.cpp servers stream prompt_progress chunks while they read a long prompt.
     if(process.env.BOLT_LLAMA_TIMINGS==='1'&&ctx.model?.provider==='bolt-local'){payload.timings_per_token=true;payload.return_progress=true;}
@@ -139,7 +164,7 @@ export default function(pi: any) {
     if(Object.keys(timings).length)ctx.ui.notify('BOLT_TIMINGS:'+JSON.stringify(timings),'info');
   });
   pi.on('tool_call',async(event: any,ctx: any)=>{
-    if(!names().includes(event.toolName))return {block:true,reason:`${event.toolName} is disabled in ${mode} mode.`};
+    if(!names().includes(event.toolName))return {block:true,reason:`${event.toolName} is not allowed right now. The chat is in ${mode} mode${webEnabled?'':' with Web off'}. Ask the user to change the permission${webTools.includes(event.toolName)?' or turn on Web':''} if this tool is needed.`};
     if(browserActions.includes(event.toolName)&&mode!=='bypass'&&!browserApproved){
       const allowed=await ctx.ui.confirm('Allow browser actions?',`The agent wants to ${event.toolName.replace('browser_','')} in the JoltDesk browser:\n\n${JSON.stringify(event.input,null,2)}\n\nAllowing applies to the rest of this chat. The agent can never type into password fields.`);
       if(!allowed)return {block:true,reason:'User declined browser actions.'};

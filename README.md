@@ -32,6 +32,10 @@ With **Web** on, the agent can work in the built-in browser. It reads a page as 
 
 For Unsloth Studio, JoltDesk reads the loaded model's real context length from `/v1/status`, and checks again after replies. Image support for Unsloth models comes from its vision check and `/v1/status`, so vision models such as Qwen3-VL accept attached images. If a model cannot take images, JoltDesk says so before sending and keeps your message and attachment. While a llama.cpp-based server such as Unsloth Studio reads a long prompt, the activity line shows its progress, for example "Processing prompt · 43% (430 / 1,000 tokens)". The context limit is confirmed during prompt processing. The sidebar shows the JoltDesk version next to its name. When a server has not reported a model's limit, the context meter shows only the tokens used, with no guessed limit. While the agent edits a file, the tool panel shows the arguments as readable lines instead of one long JSON string.
 
+## Prompt cache on local servers
+
+Local model servers such as llama.cpp and Unsloth Studio keep the processed conversation in memory and reuse it while the start of the prompt stays the same. For local APIs, JoltDesk keeps that start fixed. Every tool stays declared in the same order and the system prompt never changes, so turning **Web** on or off or changing permissions does not force the whole conversation to be processed again. The current permissions go in a short note at the end of the latest message, and a tool that is not allowed is blocked when called. Switching a long chat to another local model reprocesses the whole conversation, because each model has its own cache, so JoltDesk asks first. It shows the size and, once measured, the expected time.
+
 ## Offline APIs
 
 A chat still opens when its API is offline or has been removed. You can read the whole conversation, and choosing a model from any working API in the model menu continues the same chat there. The status bar shows which API is offline.
