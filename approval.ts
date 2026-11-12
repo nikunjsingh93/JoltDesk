@@ -1,4 +1,23 @@
 // App-owned runtime policy. No project extensions or configuration are loaded.
+import { readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
+
+const MAX_SNAPSHOT_BYTES=5*1024*1024;
+function snapshot(input: any,ctx: any){
+  let file=String(input?.path??input?.file_path??'');
+  if(file.startsWith('@'))file=file.slice(1);
+  if(file==='~'||/^~[\\/]/.test(file))file=homedir()+file.slice(1);
+  const full=resolve(ctx?.cwd||process.cwd(),file);
+  try{
+    const stat=statSync(full);
+    if(!stat.isFile()||stat.size>MAX_SNAPSHOT_BYTES)return {path:full,exists:true,tracked:false,data:null};
+    return {path:full,exists:true,tracked:true,data:readFileSync(full).toString('base64')};
+  }catch(error: any){
+    return error?.code==='ENOENT'?{path:full,exists:false,tracked:true,data:null}:{path:full,exists:true,tracked:false,data:null};
+  }
+}
+
 export default function(pi: any) {
   const modes=['chat','read','ask','bypass'];
   let mode=modes.includes(process.env.BOLT_PERMISSION_MODE||'')?process.env.BOLT_PERMISSION_MODE:'chat';
@@ -93,9 +112,17 @@ export default function(pi: any) {
   });
   pi.on('tool_call',async(event: any,ctx: any)=>{
     if(!names().includes(event.toolName))return {block:true,reason:`${event.toolName} is disabled in ${mode} mode.`};
-    if(!['write','edit','bash','powershell'].includes(event.toolName)||mode==='bypass')return;
-    if(mode!=='ask')return {block:true,reason:'File edits and commands are disabled in this permission mode.'};
-    const allowed=await ctx.ui.confirm(`Allow ${event.toolName}?`,JSON.stringify(event.input,null,2));
-    if(!allowed)return {block:true,reason:'User declined this tool action.'};
+    if(!['write','edit','bash','powershell'].includes(event.toolName))return;
+    if(mode!=='bypass'){
+      if(mode!=='ask')return {block:true,reason:'File edits and commands are disabled in this permission mode.'};
+      const allowed=await ctx.ui.confirm(`Allow ${event.toolName}?`,JSON.stringify(event.input,null,2));
+      if(!allowed)return {block:true,reason:'User declined this tool action.'};
+    }
+    // Record the file's exact bytes before an approved edit so the app can show and undo it.
+    if(event.toolName==='write'||event.toolName==='edit')ctx.ui.notify('BOLT_SNAPSHOT:'+JSON.stringify(snapshot(event.input,ctx)),'info');
+    else ctx.ui.notify('BOLT_SNAPSHOT:'+JSON.stringify({command:event.toolName}),'info');
   });
+  pi.registerCommand('bolt-note',{description:'Add an app note to the conversation context',handler:async(args:string)=>{
+    pi.sendMessage({customType:'bolt-note',content:args.trim(),display:false});
+  }});
 }

@@ -10,6 +10,7 @@ import { EngineManager } from './engine-updater.mjs';
 import { LOCAL_PROVIDER, OPENAI_CONNECTION, normalizeBaseUrl, optionalInteger, credentialId, discoverLocal } from './connections.mjs';
 import { completedMetrics } from './public/reply-metrics.mjs';
 import {makeRuntime,reduceBackground,collectInspector} from './public/chat-runtime.mjs';
+import { createCheckpoints } from './checkpoints.mjs';
 
 const root=path.dirname(fileURLToPath(import.meta.url));
 export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),vault,native,engineDir,requireBundled=false,autoStartUpdates=true,updateFetcher}={}) {
@@ -78,6 +79,14 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   const token=randomBytes(32).toString('hex'),app=express(),http=createServer(app),wss=new WebSocketServer({noServer:true});
   const runners=new Map(),subscribers=new Map(),starting=new Map();
   const metricsDir=path.join(dataDir,'reply-metrics');await fs.mkdir(metricsDir,{recursive:true});
+  const checkpoints=createCheckpoints(path.join(dataDir,'checkpoints'));
+  const restoreNotes=new Map();
+  const chatCwd=chat=>meta.projects.find(project=>project.id===chat.projectId)?.path||path.join(dataDir,'workspace');
+  // Closes the running turn's checkpoint and tells open windows to refresh Changes.
+  const finishTurn=(chatId,rpc)=>{
+    const turn=rpc.turn;if(!turn)return;rpc.turn=null;
+    checkpoints.finish(turn).then(()=>broadcast(chatId,{type:'checkpoints_changed'})).catch(()=>{});
+  };
   const metricCache=new Map(),metricWrites=new Map();
   async function replyMetrics(id){if(!metricCache.has(id)){try{metricCache.set(id,JSON.parse(await fs.readFile(path.join(metricsDir,id+'.json'),'utf8')));}catch{metricCache.set(id,{});}}return metricCache.get(id);}
   let auditQueue=Promise.resolve();
@@ -179,6 +188,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
           broadcast(chat.id,{type:'generation_start',model:chat.model,elapsedMs:0,requestStartedAt:rpc.requestStartedAt});return;
         }
         if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_RESPONSE:')){audit({type:'provider_response',chatId:chat.id,elapsedMs:rpc.requestStarted?performance.now()-rpc.requestStarted:null,...JSON.parse(e.message.slice(14))});return;}
+        if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_SNAPSHOT:')){if(rpc.turn){try{checkpoints.snapshot(rpc.turn,JSON.parse(e.message.slice(14))).catch(()=>{});}catch{}}return;}
         if(e.type==='extension_ui_request'&&e.method==='notify'&&e.message?.startsWith('BOLT_TIMINGS:')){rpc.serverTimings=JSON.parse(e.message.slice(13));broadcast(chat.id,{type:'generation_timing',timings:rpc.serverTimings});return;}
         if(e.type==='extension_ui_request'&&e.method==='confirm')rpc.pendingApproval=e.id;
         if(e.type==='message_start'&&e.message?.role==='assistant'){rpc.messageStarted=rpc.requestStarted??performance.now();e.timing={elapsedMs:performance.now()-rpc.messageStarted};}
@@ -197,11 +207,11 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
           audit({type:'reply_end',chatId:chat.id,stopReason:e.message.stopReason,...e.replyMetrics,firstDeltaMs:rpc.firstDelta,deltaCount:rpc.deltaCount});
         }
         if(e.type==='agent_start')rpc.busy=true;
-        if(e.type==='agent_settled'){rpc.busy=false;rpc.command('get_session_stats').then(s=>broadcast(chat.id,{type:'stats',data:s})).catch(()=>{});}
+        if(e.type==='agent_settled'){rpc.busy=false;finishTurn(chat.id,rpc);rpc.command('get_session_stats').then(s=>broadcast(chat.id,{type:'stats',data:s})).catch(()=>{});}
         if(e.type==='message_end'&&e.message?.role==='assistant'&&e.message.errorMessage&&e.message.stopReason!=='aborted')broadcast(chat.id,{type:'app_error',message:e.message.errorMessage});
         broadcast(chat.id,e);
       });
-      rpc.on('closed',message=>{if(runners.get(chat.id)===rpc){runners.delete(chat.id);broadcast(chat.id,{type:'engine_closed',message});}});
+      rpc.on('closed',message=>{finishTurn(chat.id,rpc);if(runners.get(chat.id)===rpc){runners.delete(chat.id);broadcast(chat.id,{type:'engine_closed',message});}});
       await rpc.command('get_state');await rpc.command('prompt',{message:'/bolt-capabilities'});runners.set(chat.id,rpc);return rpc;
     })();starting.set(chat.id,promise);
     try{return await promise;}finally{starting.delete(chat.id);}
@@ -336,6 +346,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     for(const file of await fs.readdir(sessionDir))if(file.endsWith('_'+chat.id+'.jsonl'))await fs.rename(path.join(sessionDir,file),path.join(trash,file));
     await metricWrites.get(chat.id)?.catch(()=>{});
     await fs.rename(path.join(metricsDir,chat.id+'.json'),path.join(trash,'reply-metrics.json')).catch(e=>{if(e.code!=='ENOENT')throw e;});
+    await checkpoints.remove(chat.id,trash);
     metricCache.delete(chat.id);res.json({deleted:true});
   });
   app.get('/api/chats/:id/history',async(req,res)=>{
@@ -343,6 +354,20 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     const rpc=await runner(chat);const [messages,stats,state]=await Promise.all([rpc.command('get_messages'),rpc.command('get_session_stats'),rpc.command('get_state')]);
     const metrics=await replyMetrics(chat.id),live=rpc.viewState?.streaming;
     res.json({messages:messages.messages,stats,state,busy:rpc.busy,sequence:rpc.eventSeq,live:live?{...live,elapsedMs:performance.now()-live.startedAt,firstDeltaMs:rpc.firstDelta,thinkingDurationMs:rpc.thinkingMs+(rpc.thinkingStart!==null?performance.now()-rpc.thinkingStart:0)}:null,approval:rpc.viewState?.approval,capabilities:rpc.capabilities,replyMetrics:metrics});
+  });
+  const checkpointChat=req=>{const chat=meta.chats.find(c=>c.id===req.params.id);if(!chat)throw new Error('Chat not found');return chat;};
+  app.get('/api/chats/:id/checkpoints',async(req,res)=>{checkpointChat(req);res.json({turns:await checkpoints.list(req.params.id)});});
+  app.get('/api/chats/:id/checkpoints/:turn/file',async(req,res)=>{checkpointChat(req);res.json(await checkpoints.file(req.params.id,req.params.turn,String(req.query.path||'')));});
+  app.post('/api/chats/:id/checkpoints/:turn/restore',async(req,res)=>{
+    const chat=checkpointChat(req);
+    if(runners.get(chat.id)?.busy||starting.has(chat.id))throw new Error('Wait for the response to finish before undoing changes.');
+    const result=await checkpoints.restore(chat.id,req.params.turn,{file:typeof req.body.path==='string'?req.body.path:undefined,force:req.body.force===true});
+    if(result.restored.length){
+      const previous=restoreNotes.get(chat.id);
+      restoreNotes.set(chat.id,(previous?previous+' ':'')+'The user undid earlier agent edits and restored these files to their previous contents: '+result.restored.join(', ')+'. Read these files again before changing them.');
+      broadcast(chat.id,{type:'checkpoints_changed'});
+    }
+    res.json(result);
   });
   async function inspectorFiles(chat){
     const rpc=runners.get(chat.id);
@@ -424,10 +449,13 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
               message+=`\n\n<attached_file name=${JSON.stringify(f.name)}>\n${text}\n</attached_file>`;
             }else throw new Error('MVP attachments support text, source code, and images. PDF/Office support is not implemented yet.');
           }
+          const note=restoreNotes.get(id);
+          if(note){await rpc.command('prompt',{message:'/bolt-note '+note});restoreNotes.delete(id);}
+          rpc.turn=await checkpoints.begin(id,{prompt:msg.message,cwd:chatCwd(chat)});
           const accepted=await rpc.command('prompt',{message,images});
-          if(accepted?.disposition==='handled'){rpc.busy=false;broadcast(id,{type:'agent_settled'});}
+          if(accepted?.disposition==='handled'){rpc.busy=false;finishTurn(id,rpc);broadcast(id,{type:'agent_settled'});}
           if(chat.title==='New conversation'){chat.title=String(msg.message||'Attached files').slice(0,55);await save();broadcast(id,{type:'chat_updated',chat});}
-        }catch(e){rpc.busy=false;throw e;}
+        }catch(e){rpc.busy=false;finishTurn(id,rpc);throw e;}
       }else if(msg.type==='abort'){await rpc.command('clear_queue');await rpc.command('abort',{},60000);}
       else if(msg.type==='ui_response'){rpc.send({type:'extension_ui_response',id:msg.id,confirmed:msg.confirmed,value:msg.value,cancelled:msg.cancelled});rpc.pendingApproval=null;broadcast(id,{type:'approval_resolved'});}
       else if(msg.type==='levels'){

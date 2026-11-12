@@ -3,36 +3,17 @@
 // over #browser-viewport.
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const store={get(key){try{return localStorage.getItem(key);}catch{return null;}},set(key,value){try{localStorage.setItem(key,value);}catch{}}};
+import {panelMode,setPanelMode} from './side-panel.mjs';
 const cleanError=error=>String(error?.message||error).replace(/^Error invoking remote method '[^']+': (Error: )?/,'');
-
-export function panelMode(){return document.body.classList.contains('panel-browser')?'browser':'files';}
 
 export function initBrowserPanel({toast,onAttach,showPanel}){
   const bridge=window.joltBrowser;
-  const filesTab=$('#panel-files'),browserTab=$('#panel-browser');
-  browserTab.hidden=!bridge;
-
-  function setMode(mode){
-    if(!bridge)mode='files';
-    const browser=mode==='browser';
-    document.body.classList.toggle('panel-browser',browser);
-    filesTab.setAttribute('aria-selected',String(!browser));
-    browserTab.setAttribute('aria-selected',String(browser));
-    $('#files-view').hidden=browser;
-    $('#browser-view').hidden=!browser;
-    store.set('joltdesk-panel-mode',mode);
-    window.dispatchEvent(new CustomEvent('panelmodechange',{detail:mode}));
-  }
-  filesTab.onclick=()=>setMode('files');
-  browserTab.onclick=()=>setMode('browser');
-  setMode(store.get('joltdesk-panel-mode')==='browser'?'browser':'files');
   if(!bridge)return {available:false,open:()=>false};
 
   let state={tabs:[],active:null,canGoBack:false,canGoForward:false},editingAddress=false;
   const viewport=$('#browser-viewport'),address=$('#browser-address');
   const command=(name,arg)=>bridge.command(name,arg).then(result=>{if(result?.type==='state')render(result);return result;}).catch(error=>{toast(cleanError(error));return null;});
-  const reveal=()=>{setMode('browser');showPanel();};
+  const reveal=()=>{setPanelMode('browser');showPanel();};
 
   // Native views paint above HTML, so hide the page while a dialog is open or
   // while the panel shows Files.

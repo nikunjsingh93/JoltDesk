@@ -13,6 +13,8 @@ JoltDesk is an independent desktop workspace for local and remote AI model APIs.
 | `connections.mjs` | API normalization, model discovery, context estimates, and model-specific reasoning controls |
 | `approval.ts` | App-owned Pi-Bolt extension for permissions, web tool registration, and provider timing |
 | `web-tools.cjs` | Public web search and read-only HTML/text extraction |
+| `checkpoints.mjs`, `public/changes-panel.mjs`, `public/diff.mjs` | Per-request file checkpoints, restore, Myers line diff, and the Changes tab |
+| `public/side-panel.mjs` | Files, Changes, and Browser tabs of the shared right panel |
 | `browser-pane.cjs`, `desktop-preload.cjs`, `public/browser-panel.mjs` | Built-in browser: `WebContentsView` tabs owned by the main process, a preload bridge limited to the app origin, and the Browser tab of the right side panel |
 | `public/` | HTML, CSS and vanilla JavaScript renderer, including chat state and reply metrics |
 | `engine-updater.mjs` and `bundle-engine.mjs` | Verified engine downloads, activation and packaging |
@@ -46,7 +48,10 @@ npm run portable -- --arm64
 - File permissions control the agent’s available tools and approval flow. Approved shell tools run with the current OS user’s permissions. Web access is separately opt-in and reads public pages without running their scripts.
 - The built-in browser's pages are native `WebContentsView`s drawn over `#browser-viewport` and above all HTML. The renderer hides them while any `<dialog>` is open, while the side panel shows Files, and when a page fails to load so the error text is visible. Window captures from `BrowserWindow.capturePage()` do not include these views. Capture the view's own `webContents` instead.
 - Browser tabs use the `persist:joltdesk-browser` partition, a sandbox, no preload, HTTP(S)-only navigation, and deny-by-default permissions. Agent `browser_open` accepts only public addresses through the same check as `browse_page`. `browser_read` reads the active tab in an isolated world and requires the chat's Web toggle. The user can browse anywhere, including localhost.
-- Files and Browser share the right side panel and remember separate widths.
+- Files, Changes, and Browser share the right side panel. Each tab remembers its own width.
+- Checkpoints: in `approval.ts`, the `tool_call` handler snapshots the exact file bytes as base64 after approval and before `write` or `edit` runs. It sends them as a `BOLT_SNAPSHOT:` notification. Run the snapshot only after approval, so declined calls record nothing. The server opens a checkpoint for each prompt in `rpc.turn` and closes it on `agent_settled`, on the handled disposition, on a prompt error, or when the engine closes. Closing records the after-state and drops files that did not change. Paths are absolute, resolved like the tool does from the chat's working directory. Store bytes, not decoded text, so restores are exact for any encoding.
+- Restoring a request also restores later requests that touched the same files. It compares each file with the last recorded after-state and returns `needsConfirmation` with conflicts instead of overwriting outside edits. After a restore, the next prompt first sends `/bolt-note`, a hidden custom message, so the model knows. The chat renderer ignores custom messages.
+- Command tools (`bash`, `powershell`) are recorded only as "commands ran". Their file effects are not tracked.
 - Keep the app’s MIT license separate from Pi-Bolt and other bundled notices. Preserve the signed engine bundle’s notices and provenance in distributions.
 
 ## Release convention

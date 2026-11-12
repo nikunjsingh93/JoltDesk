@@ -1,11 +1,14 @@
 import {displayMetrics,elapsedText} from './reply-metrics.mjs';
 import {partialStringField} from './stream-content.mjs';
-import {initBrowserPanel,panelMode} from './browser-panel.mjs';
+import {initBrowserPanel} from './browser-panel.mjs';
+import {initSidePanel,panelMode} from './side-panel.mjs';
+import {initChangesPanel} from './changes-panel.mjs';
 import {makeRuntime,reduceBackground,trackTool,collectInspector,updateThinking} from './chat-runtime.mjs';
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let config, current, projectId=null, ws, files=[], messages=[], streaming=null, running=false, started=0, chars=0, usage={}, stats={}, approval, generation=0, finalSeconds=0,followChat=true;
 const toolNodes=new Map();
 const chatStates=new Map();
+let changesPanel=null;
 function saveCurrentState(){if(!current)return;const s=chatStates.get(current.id);if(!s)return;Object.assign(s,{chat:current,messages,streaming,running,started,chars,usage,stats,finalSeconds,ws,files,draft:$('#prompt').value,followChat,stage:$('#activity-text').textContent,approval});}
 function parkActivity(){const activity=$('#activity');if(activity)$('#activity-parking').append(activity);}
 function mountActivity(message){
@@ -312,7 +315,7 @@ function renderChat(){
   $('#web-tools').checked=!!current?.webEnabled;
   $('#file-menu').hidePopover();
   renderModels();
-  if(streaming)mountActivity(streaming);else if(running)mountActivity(messages.findLast(m=>m.role==='assistant'));renderInspector();
+  if(streaming)mountActivity(streaming);else if(running)mountActivity(messages.findLast(m=>m.role==='assistant'));renderInspector();changesPanel?.refresh();
 }
 function scrollBottom(){const area=$('#scroll-area');if(followChat)area.scrollTop=area.scrollHeight;}
 $('#scroll-area').addEventListener('scroll',e=>{followChat=atScrollEnd(e.currentTarget);});
@@ -353,7 +356,7 @@ async function openChat(chat){
 function restoreChatState(s){current=s.chat;messages=s.messages;streaming=s.streaming;running=s.running;started=s.started;chars=s.chars;usage=s.usage;stats=s.stats;finalSeconds=s.finalSeconds;ws=s.ws;files=s.files;followChat=s.followChat;approval=s.approval;$('#prompt').value=s.draft||'';$('#activity-text').textContent=s.stage;renderFiles();renderSidebar();renderChat();setRunning(s.running);$('#activity-text').textContent=s.stage;$('#status').textContent=s.running?(s.stage?.startsWith('Thinking')?'Generating':s.stage):'Pi-Bolt connected';if(approval)showApproval(approval);scrollBottom();document.body.classList.remove('sidebar-open');}
 function deliverChatEvent(s,e){
   if(e.type==='chat_updated'){const c=config.chats.find(c=>c.id===s.chat.id);if(c)Object.assign(c,e.chat);}
-  if(current?.id===s.chat.id){trackTool(s,e);onEvent(e);saveCurrentState();if(['tool_execution_start','tool_execution_end','message_end','agent_settled'].includes(e.type))renderInspector();}
+  if(current?.id===s.chat.id){trackTool(s,e);onEvent(e);saveCurrentState();if(['checkpoints_changed','agent_start','agent_settled'].includes(e.type))changesPanel?.refresh();if(['tool_execution_start','tool_execution_end','message_end','agent_settled'].includes(e.type))renderInspector();}
   else reduceBackground(s,e);
   if(['agent_start','agent_settled','chat_updated','extension_ui_request','approval_resolved','app_error','engine_closed'].includes(e.type))renderSidebar();
 }
@@ -596,8 +599,8 @@ resizer.onpointerdown=e=>{resizing=true;resizer.setPointerCapture(e.pointerId);d
 resizer.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();setSidebarWidth(e.key==='Home'?200:e.key==='End'?480:Number(resizer.getAttribute('aria-valuenow'))+(e.key==='ArrowLeft'?-16:16));finishResize();};window.addEventListener('resize',()=>{if(innerWidth<1100)setInspector(false);});
 const inspectorResizer=document.createElement('div');inspectorResizer.id='inspector-resizer';inspectorResizer.setAttribute('role','separator');inspectorResizer.setAttribute('aria-orientation','vertical');inspectorResizer.setAttribute('aria-label','Resize files and sources');inspectorResizer.tabIndex=0;$('#work-panel').prepend(inspectorResizer);
 // Files and Browser share the side panel and remember separate widths.
-const panelSizes={files:{key:'bolt-inspector-width',css:'--inspector-width',min:220,cap:600,main:420},browser:{key:'joltdesk-browser-width',css:'--browser-width',min:320,cap:1600,main:380}};
-const panelWidths={files:Number(localStorage.getItem('bolt-inspector-width'))||250,browser:Number(localStorage.getItem('joltdesk-browser-width'))||Math.round(innerWidth*.42)};
+const panelSizes={files:{key:'bolt-inspector-width',css:'--inspector-width',min:220,cap:600,main:420},changes:{key:'joltdesk-changes-width',css:'--changes-width',min:300,cap:1400,main:380},browser:{key:'joltdesk-browser-width',css:'--browser-width',min:320,cap:1600,main:380}};
+const panelWidths={files:Number(localStorage.getItem('bolt-inspector-width'))||250,changes:Number(localStorage.getItem('joltdesk-changes-width'))||440,browser:Number(localStorage.getItem('joltdesk-browser-width'))||Math.round(innerWidth*.42)};
 let inspectorResize=null;
 function setInspectorWidth(width){const size=panelSizes[panelMode()],sidebar=innerWidth>=1100?$('#sidebar').getBoundingClientRect().width:0,max=Math.max(size.min,Math.min(size.cap,innerWidth-(innerWidth>=1100?sidebar+size.main:32)));const value=Math.round(Math.max(size.min,Math.min(max,width)));document.documentElement.style.setProperty(size.css,value+'px');inspectorResizer.setAttribute('aria-valuenow',value);inspectorResizer.setAttribute('aria-valuemin',String(size.min));inspectorResizer.setAttribute('aria-valuemax',Math.floor(max));return value;}
 const applyPanelWidth=()=>{panelWidths[panelMode()]=setInspectorWidth(panelWidths[panelMode()]);};
@@ -610,6 +613,8 @@ inspectorResizer.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].inclu
 window.addEventListener('resize',()=>setInspectorWidth(panelWidths[panelMode()]));new ResizeObserver(()=>setInspectorWidth(panelWidths[panelMode()])).observe($('#sidebar'));
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='n'){e.preventDefault();newChat(null);}if((e.ctrlKey||e.metaKey)&&e.key===','){e.preventDefault();$('#settings-dialog').showModal();}});
 const browser=initBrowserPanel({toast,showPanel:()=>setInspector(true),onAttach:file=>{files.push(file);renderFiles();$('#prompt').focus();}});
+changesPanel=initChangesPanel({api,toast,currentChat:()=>current,isRunning:()=>running});
+initSidePanel({browser:browser.available});
 // Links in replies and sources open in the built-in browser. Ctrl or Shift click uses the default browser.
 document.addEventListener('click',e=>{
   const link=e.target.closest('#messages a[href], #inspector-sources a[href]');

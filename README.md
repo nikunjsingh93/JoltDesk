@@ -24,6 +24,12 @@ Screenshots use a demo workspace and simulated model connections.
 
 ![JoltDesk settings showing both a local Qwen API and an OpenAI API marked connected](docs/screenshots/connections.png)
 
+## Review and undo agent changes (unreleased)
+
+The side panel has a **Changes** tab next to **Files** and **Browser**. Every request that edits files appears there with the files it changed and their added and removed line counts. Click a file to see a line diff.
+
+**Undo** restores every file from that request to how it was before. If later requests changed the same files, those edits are undone too. **Revert** does the same for one file. JoltDesk asks first, and asks again if a file changed outside the agent after it was edited. The agent is told about the undo on your next message. Undo covers the `write` and `edit` tools. Files changed by `bash` or `powershell` commands are not tracked, and the request notes that commands ran. Files larger than 5 MB are listed but cannot be restored. Snapshots are stored with the app's data and move to the trash folder with a deleted chat.
+
 ## Built-in browser in 0.11
 
 The right side panel now has **Files** and **Browser** tabs. Open it with the panel button in the header and choose **Browser** to browse in tabs with back, forward, reload and an address bar that also accepts searches. Links in replies and in Sources open there. Ctrl or Shift click opens your default browser instead. **＋ Chat** attaches the open page's text to your next message, and ↗ opens it in your default browser.
