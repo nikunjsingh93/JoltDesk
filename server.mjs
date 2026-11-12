@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Rpc, findBinary } from './rpc.mjs';
 import { EngineManager } from './engine-updater.mjs';
-import { LOCAL_PROVIDER, OPENAI_CONNECTION, normalizeBaseUrl, optionalInteger, credentialId, discoverLocal } from './connections.mjs';
+import { LOCAL_PROVIDER, OPENAI_CONNECTION, normalizeBaseUrl, optionalInteger, credentialId, discoverLocal, studioStatus, studioContextFor, studioVisionFor } from './connections.mjs';
 import { completedMetrics } from './public/reply-metrics.mjs';
 import {makeRuntime,reduceBackground,collectInspector} from './public/chat-runtime.mjs';
 import { createCheckpoints } from './checkpoints.mjs';
@@ -84,6 +84,31 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   const metricsDir=path.join(dataDir,'reply-metrics');await fs.mkdir(metricsDir,{recursive:true});
   const checkpoints=createCheckpoints(path.join(dataDir,'checkpoints'));
   const restoreNotes=new Map();
+  // Unsloth Studio reports the loaded model's real context at /v1/status. A reply or a
+  // freshly started chat proves which model is loaded, so check again then and keep
+  // the confirmed value. The chat's engine restarts with it before its next message.
+  async function refreshStudioContext(chat,rpc){
+    const profile=meta.connections.find(c=>c.id===rpc.boundConnection?.id);
+    if(!profile||profile.provider!=='local'||profile.contextWindow)return;
+    const model=(profile.models||[]).find(m=>m.id===chat.model);
+    // Models saved before this check existed have no studio flag yet, so they are checked too.
+    if(!model||model.studio===false)return;
+    const status=await studioStatus(profile,rpc.keySnapshot);
+    const size=studioContextFor(status,model),vision=studioVisionFor(status,model);
+    const sizeChanged=!!size&&(size!==model.contextWindow||!!model.contextWindowEstimated);
+    const visionChanged=typeof vision==='boolean'&&vision!==!!model.input?.includes('image');
+    if(!sizeChanged&&!visionChanged)return;
+    const apply=entry=>{
+      if(!entry)return;
+      if(sizeChanged){entry.contextWindow=size;entry.contextWindowEstimated=false;if(profile.maxTokens==='auto')entry.maxTokens=size;}
+      if(visionChanged)entry.input=vision?['text','image']:['text'];
+    };
+    apply(model);
+    profile.revision=(profile.revision||0)+1;
+    if(connection.id===profile.id){apply(models.find(m=>m.id===model.id));connection.revision=profile.revision;meta.connection=connection;}
+    await save();
+    for(const id of subscribers.keys())broadcast(id,{type:'config_changed'});
+  }
   const terminals=createTerminals({emit:(chatId,event)=>broadcast(chatId,event)});
   const outputText=result=>Array.isArray(result?.content)?result.content.filter(c=>c.type==='text').map(c=>c.text).join(''):undefined;
   const chatCwd=chat=>meta.projects.find(project=>project.id===chat.projectId)?.path||path.join(dataDir,'workspace');
@@ -148,7 +173,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     try{
       const catalog=await discover(candidate,LOCAL_PROVIDER);
       if(!catalog.length)throw new Error('No compatible chat models found. The previous API is unchanged.');
-      return {models:catalog.map(m=>({...m,contextWindowEstimated:local.estimates[m.id],splashThinkingBudget:!!m.reasoning&&local.splashModels.includes(m.id)})),note:local.note};
+      return {models:catalog.map(m=>({...m,contextWindowEstimated:local.estimates[m.id],splashThinkingBudget:!!m.reasoning&&local.splashModels.includes(m.id),studio:local.studioModels.includes(m.id)})),note:local.note};
     }catch(e){if(original!==null)await fs.writeFile(modelFile,original);else await fs.rm(modelFile,{force:true});throw e;}
   }
   async function runner(chat) {
@@ -219,12 +244,12 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
           if(e.type==='tool_execution_update')terminals.agentOutput(chat.id,e.toolCallId,outputText(e.partialResult));
           if(e.type==='tool_execution_end')terminals.agentEnd(chat.id,e.toolCallId,{text:outputText(e.result),exitCode:e.result?.structuredContent?.exit_code,isError:!!e.isError});
         }
-        if(e.type==='agent_settled'){rpc.busy=false;finishTurn(chat.id,rpc);terminals.agentSettled(chat.id);rpc.command('get_session_stats').then(s=>broadcast(chat.id,{type:'stats',data:s})).catch(()=>{});}
+        if(e.type==='agent_settled'){rpc.busy=false;finishTurn(chat.id,rpc);refreshStudioContext(chat,rpc).catch(()=>{});terminals.agentSettled(chat.id);rpc.command('get_session_stats').then(s=>broadcast(chat.id,{type:'stats',data:s})).catch(()=>{});}
         if(e.type==='message_end'&&e.message?.role==='assistant'&&e.message.errorMessage&&e.message.stopReason!=='aborted')broadcast(chat.id,{type:'app_error',message:e.message.errorMessage});
         broadcast(chat.id,e);
       });
       rpc.on('closed',message=>{finishTurn(chat.id,rpc);if(runners.get(chat.id)===rpc){runners.delete(chat.id);broadcast(chat.id,{type:'engine_closed',message});}});
-      await rpc.command('get_state');await rpc.command('prompt',{message:'/bolt-capabilities'});runners.set(chat.id,rpc);return rpc;
+      await rpc.command('get_state');await rpc.command('prompt',{message:'/bolt-capabilities'});runners.set(chat.id,rpc);refreshStudioContext(chat,rpc).catch(()=>{});return rpc;
     })();starting.set(chat.id,promise);
     try{return await promise;}finally{starting.delete(chat.id);}
   }
@@ -247,10 +272,10 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     res.once('close',()=>cancel.abort());
     rpc.webPending++;
     try{
-      const signal=AbortSignal.any([cancel.signal,AbortSignal.timeout(15000)]);
       const kind=String(req.body.kind||'');
+      const signal=AbortSignal.any([cancel.signal,AbortSignal.timeout(kind.startsWith('browser-')?45000:15000)]);
       const result=kind.startsWith('browser-')
-        ?await (native.browser?native.browser.agent(kind,req.body.input||{},signal):Promise.reject(new Error('The JoltDesk browser is available in the desktop app.')))
+        ?await (native.browser?native.browser.agent(kind,req.body.input||{},signal,{allowFiles:chat.mode!=='chat'}):Promise.reject(new Error('The JoltDesk browser is available in the desktop app.')))
         :await native.webTools(kind,req.body.input||{},signal);
       if(!res.destroyed)res.json(result);
     }finally{rpc.webPending--;}
@@ -660,7 +685,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
             if(!f.name||typeof f.data!=='string')throw new Error('Invalid attachment');
             if(f.data.length>14000000)throw new Error('Attachment is too large.');
             if(['image/png','image/jpeg','image/webp','image/gif'].includes(f.type)){
-              if(!model.input?.includes('image'))throw new Error('This model does not support image attachments.');
+              if(!model.input?.includes('image'))throw new Error('This model does not support image attachments. Choose a model that accepts images.');
               images.push({type:'image',data:f.data,mimeType:f.type});
             }else if(f.type?.startsWith('text/')||/\.(md|json|js|ts|tsx|jsx|py|rs|go|java|c|cpp|h|css|html|xml|yaml|yml|toml|csv|log|sql|sh|txt)$/i.test(f.name)){
               const text=Buffer.from(f.data,'base64').toString('utf8');if(text.includes('\0'))throw new Error('Binary files are not supported.');

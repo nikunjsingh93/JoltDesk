@@ -58,7 +58,7 @@ export function collectInspector(messages,inspector={files:{},tools:{}}){
       const file=calls.get(message.toolCallId);
       if(file)file.status=message.isError?'failed':'done';
     }
-    if(message.role!=='toolResult'||!['web_search','browse_page','browser_open','browser_read'].includes(message.toolName))continue;
+    if(message.role!=='toolResult'||!(['web_search','browse_page'].includes(message.toolName)||message.toolName?.startsWith('browser_')))continue;
     for(const source of Array.isArray(message.details?.sources)?message.details.sources:[]){
       try{
         const url=new URL(source.url);

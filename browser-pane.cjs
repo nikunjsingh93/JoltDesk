@@ -1,6 +1,7 @@
 // Built-in browser for the desktop app. Each tab is a sandboxed WebContentsView
 // in its own persistent partition, laid over the renderer's #browser-viewport.
 const {WebContentsView,ipcMain,shell,session}=require('electron');
+const {createBrowserAgent}=require('./browser-agent.cjs');
 
 const PARTITION='persist:joltdesk-browser';
 const HOME=process.env.BOLT_BROWSER_HOME||'https://duckduckgo.com/';
@@ -121,7 +122,7 @@ function createBrowserPane({window,appOrigin,checkAgentUrl}){
   async function read(tab,max){
     if(!tab)throw new Error('No page is open in the JoltDesk browser.');
     const contents=tab.view.webContents;
-    if(!isWeb(contents.getURL()))throw new Error('Open a web page in the JoltDesk browser first.');
+    if(!/^(https?|file):/i.test(contents.getURL()))throw new Error('Open a web page in the JoltDesk browser first.');
     return contents.executeJavaScriptInIsolatedWorld(READ_WORLD,[{code:`(${readDocument})(${Number(max)})`}]);
   }
   function waitForLoad(tab,signal){
@@ -158,6 +159,13 @@ function createBrowserPane({window,appOrigin,checkAgentUrl}){
     }
   }
 
+  const agentActions=createBrowserAgent({
+    getActiveTab:()=>tabs.find(t=>t.id===active),
+    createTab,waitForLoad,
+    reveal:()=>emit({type:'reveal'}),
+    isAttached:tab=>tab.attached
+  });
+
   ipcMain.handle('browser:command',(event,name,arg)=>{
     if(event.sender!==window.webContents||new URL(event.senderFrame.url).origin!==appOrigin)throw new Error('Browser commands are limited to JoltDesk.');
     return run(String(name),arg);
@@ -166,16 +174,10 @@ function createBrowserPane({window,appOrigin,checkAgentUrl}){
 
   return {
     run,
-    // Agent access: open a public page in a visible tab, or read the active tab.
-    async agent(kind,input,signal){
-      if(kind==='browser-read')return read(tabs.find(t=>t.id===active),12000);
-      if(kind!=='browser-open')throw new Error('Unknown browser tool.');
-      if(typeof input.url!=='string'||input.url.length>4096)throw new Error('Enter a valid page URL.');
-      const url=await checkAgentUrl(input.url);
-      emit({type:'reveal'});
-      const tab=createTab(url,{agent:true});
-      await waitForLoad(tab,signal);
-      return read(tab,12000);
+    // Agent access: open pages, read them with numbered elements, and click, type,
+    // press keys, scroll or take screenshots in the active tab.
+    agent(kind,input,signal,options={}){
+      return agentActions(kind,input,signal,{...options,checkPublic:checkAgentUrl});
     }
   };
 }

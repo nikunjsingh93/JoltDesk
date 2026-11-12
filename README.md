@@ -4,7 +4,7 @@ A standalone desktop GUI with **Pi-Bolt built in**, connected through its stream
 
 ## Run on Windows ARM64
 
-1. Open **JoltDesk-0.13.1-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
+1. Open **JoltDesk-0.14.0-win-arm64.exe** from the [Windows ARM64 release](https://github.com/nikunjsingh93/JoltDesk/releases/latest).
 2. Open **Settings & connection**, select OpenAI or Local / OpenAI-compatible API, enter connection details, and click **Connect & discover models**.
 3. Pick a model and start chatting. No manual `models.json` changes, terminal commands, or Node installation are needed for the portable build.
 
@@ -23,6 +23,12 @@ Screenshots use a demo workspace and simulated model connections.
 ### API connections
 
 ![JoltDesk settings showing both a local Qwen API and an OpenAI API marked connected](docs/screenshots/connections.png)
+
+## Browser actions and context limits in 0.14
+
+With **Web** on, the agent can work in the built-in browser. It reads a page as text plus numbered elements, clicks with `browser_click`, types with `browser_type` (optionally pressing Enter), presses keys, scrolls, and takes screenshots for models that accept images. The first click, typing, or key press in a chat asks for approval once, unless the chat uses Bypass. The agent cannot type into password fields. `browser_open` also opens local dev servers such as `http://localhost:3000`, and local files such as an HTML page it built when the chat has **Read files** or a higher permission. Other private network addresses stay blocked.
+
+For Unsloth Studio, JoltDesk reads the loaded model's real context length from `/v1/status`, and checks again after replies. Image support for Unsloth models comes from its vision check and `/v1/status`, so vision models such as Qwen3-VL accept attached images. If a model cannot take images, JoltDesk says so before sending and keeps your message and attachment. When a server has not reported a model's limit, the context meter shows only the tokens used, with no guessed limit. While the agent edits a file, the tool panel shows the arguments as readable lines instead of one long JSON string.
 
 ## Offline APIs
 

@@ -1,5 +1,5 @@
 import {displayMetrics,elapsedText} from './reply-metrics.mjs';
-import {partialStringField} from './stream-content.mjs';
+import {partialStringField,readableArguments} from './stream-content.mjs';
 import {initBrowserPanel} from './browser-panel.mjs';
 import {initSidePanel,panelMode} from './side-panel.mjs';
 import {initChangesPanel} from './changes-panel.mjs';
@@ -210,8 +210,10 @@ function renderToolBlock(block,box,open){
   const args=block.argumentText||'';
   const path=block.arguments?.path||partialStringField(args,'path');
   const content=block.arguments?.content??partialStringField(args,'content');
-  const text=(block.name==='write'&&content?content:args||JSON.stringify(block.arguments,null,2))||'';
-  const language=block.name==='write'?(fileLanguages[path.split('.').at(-1)]||''):'json';
+  // Written files stream as code. Other tools show their arguments decoded, so code inside
+  // an edit appears line by line instead of as one long escaped JSON string.
+  const text=(block.name==='write'&&content?content:readableArguments(args||JSON.stringify(block.arguments||{})))||'';
+  const language=block.name==='write'?(fileLanguages[path.split('.').at(-1)]||''):'yaml';
   const summary=box.querySelector('summary');
   const label=`⌘ ${block.name}${path?' · '+path:''}${block.isStreaming?' · generating…':''}`;
   if(summary.textContent!==label)summary.textContent=label;
@@ -340,12 +342,13 @@ function updateMetrics(){
   if(streaming?.el){paintReplyMetrics(streaming,streaming.el);paintThinking(streaming,streaming.el);}
   const thinkingMs=streaming?.isThinking?Number(streaming.thinkingDurationMs||0)+Math.max(0,performance.now()-(streaming.thinkingTickAt||performance.now())):null;
   $('#elapsed').textContent=elapsedText(thinkingMs??seconds*1000);
-  const c=stats.contextUsage,windowSize=config?.models.find(m=>m.id===$('#model').value)?.contextWindow||c?.contextWindow;
+  // An estimated limit is not shown: the engine's own stats carry the same guess.
+  const selectedModel=config?.models.find(m=>m.id===$('#model').value),c=stats.contextUsage,windowSize=selectedModel?.contextWindowEstimated?null:selectedModel?.contextWindow||c?.contextWindow;
   const liveInput=Number(usage.input||0)+Number(usage.cacheRead||0)+Number(usage.cacheWrite||0);
   const contextTokens=running?(liveInput||c?.tokens||0)+output:c?.tokens??(!current?0:null);
   const percent=windowSize?100*(contextTokens||0)/windowSize:0;
-  const windowEstimated=config?.models.find(m=>m.id===$('#model').value)?.contextWindowEstimated;
-  $('#context').textContent=windowSize&&contextTokens!=null?`Context ${running&&!liveInput?'~':''}${Number(contextTokens).toLocaleString()} / ${windowEstimated?'~':''}${Number(windowSize).toLocaleString()} · ${percent.toFixed(1)}%`:windowSize?`Context — / ${windowEstimated?'~':''}${Number(windowSize).toLocaleString()}`:'Context —';
+  $('#context').textContent=windowSize&&contextTokens!=null?`Context ${running&&!liveInput?'~':''}${Number(contextTokens).toLocaleString()} / ${Number(windowSize).toLocaleString()} · ${percent.toFixed(1)}%`:windowSize?`Context — / ${Number(windowSize).toLocaleString()}`:contextTokens?`Context ${Number(contextTokens).toLocaleString()}`:'Context —';
+  $('#context').title=windowSize?'':'The server has not reported this model’s context limit yet.';
   $('#context-fill').style.width=percent+'%';
 }
 setInterval(()=>{if(running)updateMetrics();},200);
@@ -377,6 +380,7 @@ function showOffline(info){
 }
 function restoreChatState(s){current=s.chat;messages=s.messages;streaming=s.streaming;running=s.running;started=s.started;chars=s.chars;usage=s.usage;stats=s.stats;finalSeconds=s.finalSeconds;ws=s.ws;files=s.files;followChat=s.followChat;approval=s.approval;$('#prompt').value=s.draft||'';$('#activity-text').textContent=s.stage;renderFiles();renderSidebar();renderChat();setRunning(s.running);$('#activity-text').textContent=s.stage;$('#status').textContent=s.running?(s.stage?.startsWith('Thinking')?'Generating':s.stage):'Pi-Bolt connected';if(approval)showApproval(approval);scrollBottom();document.body.classList.remove('sidebar-open');}
 function deliverChatEvent(s,e){
+  if(e.type==='config_changed'){api('/config').then(next=>{config=next;renderModels();updateMetrics();}).catch(()=>{});return;}
   if(e.type==='chat_updated'){const c=config.chats.find(c=>c.id===s.chat.id);if(c)Object.assign(c,e.chat);}
   if(current?.id===s.chat.id){trackTool(s,e);onEvent(e);saveCurrentState();if(['checkpoints_changed','agent_start','agent_settled'].includes(e.type))changesPanel?.refresh();if(['agent_start','agent_settled'].includes(e.type))gitPanel?.refresh();if(e.type==='terminal')terminalPanel?.event(e);if(['tool_execution_start','tool_execution_end','message_end','agent_settled'].includes(e.type))renderInspector();}
   else reduceBackground(s,e);
@@ -463,6 +467,12 @@ async function send(){
   if(!current){await newChat();if(ws?.readyState===0)await new Promise(resolve=>{const timer=setTimeout(resolve,10000);ws.addEventListener('open',()=>{clearTimeout(timer);resolve();},{once:true});});}
   if(!ws||ws.readyState!==1){toast('Connecting to Pi-Bolt. Try sending again in a moment.');return;}
   try{
+    // Refuse images for a text-only model before sending, and keep the message and files.
+    const images=files.filter(f=>/^image\//.test(f.type));
+    const chosen=$('#model').selectedOptions[0],connectionId=chosen?.dataset.connectionId||current?.connectionId||config.connection?.id;
+    const modelId=chosen?.dataset.modelId||$('#model').value;
+    const modelInfo=(config.connections||[]).find(c=>c.id===connectionId)?.models?.find(m=>m.id===modelId)||config.models.find(m=>m.id===modelId);
+    if(images.length&&modelInfo&&!modelInfo.input?.includes('image')){toast(`${modelInfo.name||modelInfo.id} does not accept images. Choose a vision model, or remove the image to send text only. Your message is still in the box.`);return;}
     await patchChat({model:$('#model').value,thinking:$('#thinking').value,webEnabled:$('#web-tools').checked});
     const attached=[...files];const display=text+(attached.length?'\n\n'+attached.map(f=>'📎 '+f.name).join('\n'):'');
     const m={role:'user',content:[{type:'text',text:display}]};messages.push(m);$('#welcome').classList.add('hidden');$('#messages').append(messageNode(m));

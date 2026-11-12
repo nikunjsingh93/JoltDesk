@@ -23,7 +23,7 @@ export class Rpc extends EventEmitter {
       if(process.platform==='win32')tools.push('powershell');
       tools.push('grep','find','ls');
       if(webAccess)tools.push('web_search','browse_page');
-      if(webAccess?.browser)tools.push('browser_open','browser_read');
+      if(webAccess?.browser)tools.push('browser_open','browser_read','browser_click','browser_type','browser_press','browser_scroll','browser_screenshot');
       args.push('--tools',tools.join(','));
     }
     else if(mode === 'chat') args.push('--no-tools');

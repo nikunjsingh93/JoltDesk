@@ -25,7 +25,7 @@ app.whenReady().then(async()=>{
   const {startServer}=await import(pathToFileURL(path.join(__dirname,'server.mjs')).href);
   const native={
     webTools:createWebTools(BrowserWindow),
-    browser:{agent:(kind,input,signal)=>{if(!browserPane)throw new Error('The JoltDesk browser is not ready.');return browserPane.agent(kind,input,signal);}},
+    browser:{agent:(kind,input,signal,options)=>{if(!browserPane)throw new Error('The JoltDesk browser is not ready.');return browserPane.agent(kind,input,signal,options);}},
     pickFolder:async()=>{const r=await dialog.showOpenDialog({properties:['openDirectory']});return r.canceled?'':r.filePaths[0];},
     async fileAction(action,file){
       if(action==='reveal'){shell.showItemInFolder(file);return;}
@@ -57,6 +57,8 @@ app.whenReady().then(async()=>{
     window.show();
   }
   browserPane=createBrowserPane({window,appOrigin:new URL(backend.url).origin,checkAgentUrl:assertPublicAddress});
+  // UI checks drive the browser pane directly. Never set outside tests.
+  if(process.env.BOLT_TEST_HOOKS==="1")global.__joltBrowserPane=browserPane;
   window.webContents.setWindowOpenHandler(({url})=>{if(/^https?:\/\//.test(url))shell.openExternal(url);return {action:'deny'};});
   window.webContents.on('will-navigate',(event,url)=>{if(new URL(url).origin!==backend.url)event.preventDefault();});
   await window.loadURL(backend.url);

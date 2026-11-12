@@ -11,6 +11,29 @@ export function optionalInteger(value,label,min=1,max=10000000){
   const n=Number(value);if(!Number.isInteger(n)||n<min||n>max)throw new Error(`${label} must be a whole number between ${min} and ${max}.`);return n;
 }
 export function credentialId(connection){return connection.provider==='local'?'local@'+connection.baseUrl:'openai';}
+// Unsloth Studio reports the loaded model's runtime context at /v1/status.
+// The value applies only to the model it names, never to other listed models.
+export function studioContextFor(status,model){
+  if(!status||typeof status!=='object')return null;
+  const names=[model.id,model.name,model.root].filter(Boolean);
+  const loaded=[status.model_identifier,status.active_model].filter(Boolean);
+  if(!loaded.some(name=>names.includes(name)))return null;
+  const value=Number(status.context_length);
+  return Number.isInteger(value)&&value>0?value:null;
+}
+export function studioVisionFor(status,model){
+  if(!status||typeof status!=='object')return null;
+  const names=[model.id,model.name,model.root].filter(Boolean);
+  if(![status.model_identifier,status.active_model].filter(Boolean).some(name=>names.includes(name)))return null;
+  return typeof status.is_vision==='boolean'?status.is_vision:null;
+}
+export async function studioStatus(connection,key,fetcher=fetch){
+  const base=normalizeBaseUrl(connection.baseUrl);
+  try{
+    const r=await fetcher(base+'/status',{headers:key?{Authorization:`Bearer ${key}`}:{},redirect:'error',signal:AbortSignal.timeout(8000)});
+    return r.ok?await r.json():null;
+  }catch{return null;}
+}
 export async function discoverLocal(connection,key,fetcher=fetch){
   const base=normalizeBaseUrl(connection.baseUrl),headers=key?{Authorization:`Bearer ${key}`}:{},root=base.replace(/\/v1$/,'');
   const request=async url=>{
@@ -45,6 +68,16 @@ export async function discoverLocal(connection,key,fetcher=fetch){
     }catch{return null;}}));
     if(rendered.every(Boolean)&&new Set(rendered.map(p=>p.prompt)).size===3)legacyEfforts.set(m.id||m.name,rendered.map(p=>p.effort));
   }));
+  const studio=raw.some(m=>m.owned_by==='unsloth-studio')?await studioStatus(connection,key,fetcher):null;
+  // Unsloth Studio does not list image support in /v1/models, so ask its vision check.
+  // Model IDs contain a slash, so try the encoded form and then the plain path.
+  const studioVision=new Map();
+  await Promise.all(raw.filter(m=>m.owned_by==='unsloth-studio').map(async m=>{
+    const id=m.id||m.name;
+    for(const name of [encodeURIComponent(id),id]){
+      try{const r=await request(root+'/api/models/check-vision/'+name);if(typeof r?.is_vision==='boolean'){studioVision.set(id,r.is_vision);return;}}catch{}
+    }
+  }));
   const thinkingTokenBudget=optionalInteger(connection.thinkingTokenBudget,'Thinking token budget',0);
   const models=raw.map(m=>{
     const id=m.id||m.name;
@@ -58,7 +91,7 @@ export async function discoverLocal(connection,key,fetcher=fetch){
     // server metadata takes precedence, including an empty list (on/off only).
     const unslothEfforts=Array.isArray(m.reasoning_effort_levels)?m.reasoning_effort_levels:Array.isArray(p.reasoning_effort_levels)?p.reasoning_effort_levels:Array.isArray(p.chat_template_caps?.reasoning_effort_levels)?p.chat_template_caps.reasoning_effort_levels:
       unsloth&&m.supports_reasoning!==false&&p.supports_reasoning!==false&&/qwen3[._-]8(?:[-:/]|$)/i.test(id+' '+(m.root||''))?['low','medium','xhigh']:undefined;
-    const detected=optionalInteger(p.default_generation_settings?.n_ctx||p.n_ctx||m.meta?.n_ctx||m.context_window||m.context_length||m.contextWindow||m.max_model_len||null,'Reported context',1);
+    const detected=optionalInteger((unsloth?studioContextFor(studio,{id,name:m.name,root:m.root}):null)||p.default_generation_settings?.n_ctx||p.n_ctx||m.meta?.n_ctx||m.context_window||m.context_length||m.contextWindow||m.max_model_len||null,'Reported context',1);
     const native=optionalInteger(m.native_context_length||m.meta?.n_ctx_train||null,'Native context',1);
     const contextWindow=ctxOverride||detected||native||Math.max(32768,maxOverride||0);
     const maxTokens=autoOutput?contextWindow:maxOverride||Math.min(4096,Math.max(1,Math.floor(contextWindow/2)));
@@ -66,7 +99,10 @@ export async function discoverLocal(connection,key,fetcher=fetch){
     const reasoning=connection.thinking==='on'||connection.thinking!=='off'&&(
       m.reasoning===true||m.reasoning?.thinks===true||m.reasoning?.efforts?.length>0||m.supports_reasoning===true||p.supports_reasoning===true||unslothEfforts?.length>0||/enable_thinking|<think>/.test(p.chat_template||'')||(/qwen3|qwq|deepseek.*r1|gpt-oss/i.test(id+' '+(m.root||''))&&!/coder|instruct-2507/i.test(id)));
     const llama=connection.profile!=='generic';
-    const vision=p.modalities?.vision||m.vision===true||m.input_modalities?.includes('image')||m.input?.includes('image');
+    const capabilities=Array.isArray(m.capabilities)?m.capabilities.map(String):[];
+    const vision=p.modalities?.vision||m.vision===true||m.input_modalities?.includes('image')||m.input?.includes('image')||
+      capabilities.some(c=>/^(vision|image|images|image_input)$/i.test(c))||
+      (unsloth&&(studioVisionFor(studio,{id,name:m.name,root:m.root})??studioVision.get(id)??/(^|[-_/])VL([-_.]|$)/i.test(id)));
     const model={id,name:m.name||id,reasoning,input:vision?['text','image']:['text'],
       contextWindow,maxTokens,cost:{input:0,output:0,cacheRead:0,cacheWrite:0},
       compat:{maxTokensField:'max_tokens',supportsStore:false,supportsDeveloperRole:false,supportsReasoningEffort:false,supportsUsageInStreaming:true,supportsStrictMode:false}};
@@ -87,5 +123,5 @@ export async function discoverLocal(connection,key,fetcher=fetch){
     }
     estimates[id]=!ctxOverride&&!detected;return model;
   });
-  return {baseUrl:base,estimates,splashModels:raw.filter(m=>m.owned_by==='splash').map(m=>m.id||m.name),definition:{baseUrl:base,api:'openai-completions',apiKey:'$BOLT_LOCAL_API_KEY',authHeader:true,headers:{Accept:'text/event-stream','Accept-Encoding':'identity','Cache-Control':'no-cache'},models},note:ctxOverride?'Using your context window override.':Object.values(estimates).some(Boolean)?'Some models do not advertise a running context limit. Sizes marked ~ are estimates. Load the model and reconnect to refresh, or enter a context window.':'Context window detected from the server.'};
+  return {baseUrl:base,estimates,splashModels:raw.filter(m=>m.owned_by==='splash').map(m=>m.id||m.name),studioModels:raw.filter(m=>m.owned_by==='unsloth-studio').map(m=>m.id||m.name),definition:{baseUrl:base,api:'openai-completions',apiKey:'$BOLT_LOCAL_API_KEY',authHeader:true,headers:{Accept:'text/event-stream','Accept-Encoding':'identity','Cache-Control':'no-cache'},models},note:ctxOverride?'Using your context window override.':Object.values(estimates).some(Boolean)?'Some models do not advertise a running context limit. Sizes marked ~ are estimates. Load the model and reconnect to refresh, or enter a context window.':'Context window detected from the server.'};
 }

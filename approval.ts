@@ -25,32 +25,52 @@ export default function(pi: any) {
   const fullTools=['read','write','edit','bash','powershell','grep','find','ls'];
   const webUrl=process.env.BOLT_WEB_URL;
   const webKey=process.env.BOLT_WEB_KEY;
-  const webTools=['web_search','browse_page','browser_open','browser_read'];
+  const browserActions=['browser_click','browser_type','browser_press'];
+  const webTools=['web_search','browse_page','browser_open','browser_read','browser_click','browser_type','browser_press','browser_scroll','browser_screenshot'];
   let webEnabled=false;
+  // Clicking and typing need one approval per chat unless the user chose bypass.
+  let browserApproved=false;
+  const object=(properties:any,required:string[]=[])=>({type:'object',properties,required,additionalProperties:false});
+  const element={type:'integer',description:'Element number from the latest page listing, for example 3 for [3].'};
+  // Formats a browser snapshot: page text plus numbered elements the agent can act on.
+  const pageText=(result:any)=>{
+    const scroll=result.scroll&&result.scroll.height>result.scroll.view+8
+      ?`\nScroll: ${Math.round(100*(result.scroll.top+result.scroll.view)/result.scroll.height)}% of the page is above the bottom of the window${result.scroll.top+result.scroll.view<result.scroll.height-8?', more below':''}.`:'';
+    return `${result.title}\n${result.url}${scroll}\n\nPage text:\n${result.text||'(no text)'}\n\nInteractive elements (use the number with browser_click or browser_type):\n${result.elements||'(none found)'}`;
+  };
   if(webUrl&&webKey){
+    const browser=process.env.BOLT_BROWSER==='1';
     for(const tool of [
-      {name:'web_search',label:'Search the web',kind:'search',field:'query',description:'Find public web pages. Use the returned source URLs to cite the answer.'},
-      {name:'browse_page',label:'Read a web page',kind:'browse',field:'url',description:'Open a public URL and read its text and links. Follow a link by calling this tool with its URL.'},
-      ...(process.env.BOLT_BROWSER==='1'?[
-        {name:'browser_open',label:'Open in JoltDesk browser',kind:'browser-open',field:'url',description:'Open a public URL in a new tab of the user\'s visible JoltDesk browser, let the page run its scripts, and read the rendered text and links. Use this for pages that need JavaScript or when the user wants to see the page.'},
-        {name:'browser_read',label:'Read the open browser page',kind:'browser-read',field:'',description:'Read the text and links of the page the user currently has open in the JoltDesk browser. Use this when the user refers to the page they are viewing.'}
+      {name:'web_search',label:'Search the web',kind:'search',parameters:object({query:{type:'string'}},['query']),description:'Find public web pages. Use the returned source URLs to cite the answer.'},
+      {name:'browse_page',label:'Read a web page',kind:'browse',parameters:object({url:{type:'string'}},['url']),description:'Read the text and links of a public URL without running its scripts. Follow a link by calling this tool with its URL.'},
+      ...(browser?[
+        {name:'browser_open',label:'Open in JoltDesk browser',kind:'browser-open',parameters:object({url:{type:'string',description:'A web address, a local dev server such as http://localhost:3000, or the full path of a local file such as an HTML page you created.'}},['url']),description:'Open a page in a new tab of the user\'s visible JoltDesk browser and run its scripts. Returns the page text and numbered interactive elements. Use it to show pages, test web pages or local HTML files you built, and to start tasks that need clicking or typing.'},
+        {name:'browser_read',label:'Read the browser page',kind:'browser-read',parameters:object({}),description:'Read the page currently open in the JoltDesk browser: its text and numbered interactive elements. Use this when the user refers to the page they are viewing, or to refresh element numbers.'},
+        {name:'browser_click',label:'Click in the browser',kind:'browser-click',parameters:object({element},['element']),description:'Click a numbered element (link, button, checkbox, tab) on the open browser page. Returns the updated page.'},
+        {name:'browser_type',label:'Type in the browser',kind:'browser-type',parameters:object({element,text:{type:'string'},submit:{type:'boolean',description:'Press Enter after typing, for example to run a search.'},clear:{type:'boolean',description:'Replace the existing text. Defaults to true.'}},['element','text']),description:'Type text into a numbered text field on the open browser page, optionally pressing Enter. Returns the updated page. Never use it for passwords.'},
+        {name:'browser_press',label:'Press a key in the browser',kind:'browser-press',parameters:object({key:{type:'string',enum:['Enter','Tab','Escape','Backspace','Delete','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End']}},['key']),description:'Press a key on the open browser page, for example ArrowDown to move through suggestions or Escape to close a dialog. Returns the updated page.'},
+        {name:'browser_scroll',label:'Scroll the browser',kind:'browser-scroll',parameters:object({direction:{type:'string',enum:['down','up']},pages:{type:'number',description:'How many screens to scroll. Defaults to 1.'}},['direction']),description:'Scroll the open browser page to see more of it. Returns the updated page.'},
+        {name:'browser_screenshot',label:'Screenshot the browser',kind:'browser-screenshot',parameters:object({}),description:'Take a screenshot of the open browser page to check how it looks, for example the layout of a page you built. Needs a model that accepts images.'}
       ]:[])
     ]){
       pi.registerTool({
         name:tool.name,label:tool.label,description:tool.description,defaultActive:false,
-        parameters:tool.field?{type:'object',properties:{[tool.field]:{type:'string'}},required:[tool.field],additionalProperties:false}:{type:'object',properties:{},additionalProperties:false},
+        parameters:tool.parameters,
         async execute(_id:string,input:any,signal?:AbortSignal){
           const response=await fetch(webUrl,{
             method:'POST',headers:{'Content-Type':'application/json','X-Bolt-Web-Key':webKey},
-            body:JSON.stringify({kind:tool.kind,input:tool.field?input:{}}),signal
+            body:JSON.stringify({kind:tool.kind,input:input||{}}),signal
           });
           const result=await response.json();
           if(!response.ok)throw new Error(result.error||'Web request failed.');
-          const sources=tool.kind==='search'?result.sources:[{url:result.url,title:result.title}];
-          const text=tool.kind==='search'
-            ?sources.map((source:any)=>source.title+'\n'+source.url+'\n'+source.snippet).join('\n\n')||'No search results.'
-            :result.title+'\n'+result.url+'\n\n'+result.text+'\n\nLinks:\n'+result.links.map((link:any)=>link.title+' — '+link.url).join('\n');
-          return {content:[{type:'text',text}],details:{sources}};
+          if(tool.kind==='search'){
+            const sources=result.sources;
+            return {content:[{type:'text',text:sources.map((source:any)=>source.title+'\n'+source.url+'\n'+source.snippet).join('\n\n')||'No search results.'}],details:{sources}};
+          }
+          const sources=/^https?:/.test(result.url||'')?[{url:result.url,title:result.title}]:[];
+          if(tool.kind==='browse')return {content:[{type:'text',text:result.title+'\n'+result.url+'\n\n'+result.text+'\n\nLinks:\n'+result.links.map((link:any)=>link.title+' — '+link.url).join('\n')}],details:{sources}};
+          if(tool.kind==='browser-screenshot')return {content:[{type:'image',data:result.image,mimeType:result.mimeType},{type:'text',text:`Screenshot of ${result.title}\n${result.url}`}],details:{sources}};
+          return {content:[{type:'text',text:pageText(result)}],details:{sources}};
         }
       });
     }
@@ -112,6 +132,11 @@ export default function(pi: any) {
   });
   pi.on('tool_call',async(event: any,ctx: any)=>{
     if(!names().includes(event.toolName))return {block:true,reason:`${event.toolName} is disabled in ${mode} mode.`};
+    if(browserActions.includes(event.toolName)&&mode!=='bypass'&&!browserApproved){
+      const allowed=await ctx.ui.confirm('Allow browser actions?',`The agent wants to ${event.toolName.replace('browser_','')} in the JoltDesk browser:\n\n${JSON.stringify(event.input,null,2)}\n\nAllowing applies to the rest of this chat. The agent can never type into password fields.`);
+      if(!allowed)return {block:true,reason:'User declined browser actions.'};
+      browserApproved=true;
+    }
     if(!['write','edit','bash','powershell'].includes(event.toolName))return;
     if(mode!=='bypass'){
       if(mode!=='ask')return {block:true,reason:'File edits and commands are disabled in this permission mode.'};
