@@ -1,6 +1,12 @@
 # JoltDesk development handoff
 
-Updated November 12, 2026 by Claude Code.
+Updated November 17, 2026 by Claude Code.
+
+## Router context window and 0.14.9 (November 17, 2026)
+
+The user's llama.cpp switcher (`--models-preset models.ini`, one endpoint for several models) showed 262144 for Ornith although the preset launches it with `ctx-size = 131072`. The router's `/v1/models` lists `context_length` as the trained maximum, and an unloaded model has no `meta.n_ctx`, so JoltDesk fell through to it. Added `launchContext()` in `connections.mjs`, which reads `--ctx-size`/`-c` from each model's `status.args` (present loaded or not) and ranks it after the runtime `n_ctx` values and before `context_length`. A model with no `ctx-size` still falls back to the trained value. Reconnecting refreshes the window.
+
+Verification: `test/launch-context.test.mjs` added; it and the local-connection, multiple-apis and unsloth-context tests passed. The full `npm test` and the UI checks were not rerun for this one-function change. The packaged app was checked to contain the fix but was not launched with an isolated profile; the user ran it against their switcher and confirmed it works. Published [0.14.9](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.14.9) from commit `c34af9f`; GitHub reports SHA-256 `1045a425b862956bb5b9d8d7a81ec1b80562ed9f2b3daa03e9c1343967b03a31` for the ARM64 zip, matching the local artifact. Next: none pending.
 
 ## Worker progress and 0.14.8 (November 12, 2026)
 
