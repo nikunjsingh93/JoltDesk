@@ -91,3 +91,5 @@ npm run zip -- --arm64
 ## Release convention
 
 Keep generated binaries, private diagnostics, profiles, and engine downloads out of Git. Build the Windows ARM64 zip, smoke-test the package using an isolated profile, check the artifact and license files, and attach the executable to a versioned GitHub release.
+
+- llama.cpp router (`--models-preset`): /v1/models lists every preset with `status.args`; `context_length` there is the trained maximum (e.g. 262144), not the launch window. `launchContext()` in connections.mjs reads `--ctx-size`/`-c` from `status.args` so unloaded models show the configured window (e.g. 131072). Reconnect or restart JoltDesk to refresh.

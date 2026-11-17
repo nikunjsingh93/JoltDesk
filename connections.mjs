@@ -22,6 +22,14 @@ export function studioContextFor(status,model){
   const value=Number(status.context_length);
   return Number.isInteger(value)&&value>0?value:null;
 }
+// A llama.cpp router lists the launch arguments of every preset, loaded or not.
+// --ctx-size there is the real window; context_length is only the trained maximum.
+export function launchContext(model){
+  const args=Array.isArray(model?.status?.args)?model.status.args.map(String):[];
+  const i=args.findIndex(a=>a==='--ctx-size'||a==='-c');
+  const n=i>=0?Number(args[i+1]):NaN;
+  return Number.isInteger(n)&&n>0?n:null;
+}
 export function studioVisionFor(status,model){
   if(!status||typeof status!=='object')return null;
   const names=[model.id,model.name,model.root].filter(Boolean);
@@ -103,7 +111,7 @@ export async function discoverLocal(connection,key,fetcher=fetch){
     // server metadata takes precedence, including an empty list (on/off only).
     const unslothEfforts=Array.isArray(m.reasoning_effort_levels)?m.reasoning_effort_levels:Array.isArray(p.reasoning_effort_levels)?p.reasoning_effort_levels:Array.isArray(p.chat_template_caps?.reasoning_effort_levels)?p.chat_template_caps.reasoning_effort_levels:
       unsloth&&m.supports_reasoning!==false&&p.supports_reasoning!==false&&/qwen3[._-]8(?:[-:/]|$)/i.test(id+' '+(m.root||''))?['low','medium','xhigh']:undefined;
-    const detected=optionalInteger((unsloth?studioContextFor(studio,{id,name:m.name,root:m.root}):null)||p.default_generation_settings?.n_ctx||p.n_ctx||m.meta?.n_ctx||m.context_window||m.context_length||m.contextWindow||m.max_model_len||null,'Reported context',1);
+    const detected=optionalInteger((unsloth?studioContextFor(studio,{id,name:m.name,root:m.root}):null)||p.default_generation_settings?.n_ctx||p.n_ctx||m.meta?.n_ctx||launchContext(m)||m.context_window||m.context_length||m.contextWindow||m.max_model_len||null,'Reported context',1);
     const native=optionalInteger(m.native_context_length||m.meta?.n_ctx_train||null,'Native context',1);
     // An unknown window must not be guessed small: the engine compacts at about 90%
     // of it, and each compaction resends the whole conversation. With a generous
