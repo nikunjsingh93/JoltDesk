@@ -1,3 +1,4 @@
+import {execFile} from 'node:child_process';
 export const LOCAL_PROVIDER='bolt-local';
 export const ASSUMED_CONTEXT=131072;
 export const OPENAI_CONNECTION={provider:'openai',baseUrl:'https://api.openai.com/v1',autoConnect:true};
@@ -29,6 +30,25 @@ export function launchContext(model){
   const i=args.findIndex(a=>a==='--ctx-size'||a==='-c');
   const n=i>=0?Number(args[i+1]):NaN;
   return Number.isInteger(n)&&n>0?n:null;
+}
+// ToRc (torc-server) never reports its context: /v1/models lists only the name.
+// The window is the fourth argument of `torc-server <model> <port> <threads> <ctx> <name>`.
+export function torcContextFromCommandLine(commandLine){
+  const tokens=[...String(commandLine||'').matchAll(/"([^"]*)"|(\S+)/g)].map(m=>m[1]??m[2]);
+  const i=tokens.findIndex(t=>/(^|[\\/])torc-server(\.exe)?$/i.test(t));
+  if(i<0)return null;
+  const n=Number(tokens[i+4]);
+  return Number.isInteger(n)&&n>0?n:null;
+}
+// Only for a server on this machine: finds the process listening on the port and reads its command line.
+export async function torcLaunchContext(baseUrl,run=(cmd,args)=>new Promise(res=>execFile(cmd,args,{timeout:6000,windowsHide:true},(e,out)=>res(e?'':String(out))))){
+  if(process.platform!=='win32')return null;
+  let u;try{u=new URL(baseUrl);}catch{return null;}
+  if(!['127.0.0.1','localhost','[::1]'].includes(u.hostname))return null;
+  const port=Number(u.port||(u.protocol==='https:'?443:80));
+  if(!Number.isInteger(port)||port<1||port>65535)return null;
+  const script=`$c=Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue|Where-Object{$_.OwningProcess}|Select-Object -First 1;if($c){(Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)").CommandLine}`;
+  return torcContextFromCommandLine(await run('powershell.exe',['-NoProfile','-NonInteractive','-Command',script]));
 }
 export function studioVisionFor(status,model){
   if(!status||typeof status!=='object')return null;
@@ -98,6 +118,7 @@ export async function discoverLocal(connection,key,fetcher=fetch){
       try{const r=await request(root+'/api/models/check-vision/'+name);if(typeof r?.is_vision==='boolean'){studioVision.set(id,r.is_vision);return;}}catch{}
     }
   }));
+  const torcContext=raw.some(m=>m.owned_by==='torc')&&!ctxOverride?await torcLaunchContext(base):null;
   const thinkingTokenBudget=optionalInteger(connection.thinkingTokenBudget,'Thinking token budget',0);
   const models=raw.map(m=>{
     const id=m.id||m.name;
@@ -111,7 +132,7 @@ export async function discoverLocal(connection,key,fetcher=fetch){
     // server metadata takes precedence, including an empty list (on/off only).
     const unslothEfforts=Array.isArray(m.reasoning_effort_levels)?m.reasoning_effort_levels:Array.isArray(p.reasoning_effort_levels)?p.reasoning_effort_levels:Array.isArray(p.chat_template_caps?.reasoning_effort_levels)?p.chat_template_caps.reasoning_effort_levels:
       unsloth&&m.supports_reasoning!==false&&p.supports_reasoning!==false&&/qwen3[._-]8(?:[-:/]|$)/i.test(id+' '+(m.root||''))?['low','medium','xhigh']:undefined;
-    const detected=optionalInteger((unsloth?studioContextFor(studio,{id,name:m.name,root:m.root}):null)||p.default_generation_settings?.n_ctx||p.n_ctx||m.meta?.n_ctx||launchContext(m)||m.context_window||m.context_length||m.contextWindow||m.max_model_len||null,'Reported context',1);
+    const detected=optionalInteger((unsloth?studioContextFor(studio,{id,name:m.name,root:m.root}):null)||p.default_generation_settings?.n_ctx||p.n_ctx||m.meta?.n_ctx||launchContext(m)||(m.owned_by==='torc'?torcContext:null)||m.context_window||m.context_length||m.contextWindow||m.max_model_len||null,'Reported context',1);
     const native=optionalInteger(m.native_context_length||m.meta?.n_ctx_train||null,'Native context',1);
     // An unknown window must not be guessed small: the engine compacts at about 90%
     // of it, and each compaction resends the whole conversation. With a generous
