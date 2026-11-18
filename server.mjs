@@ -210,9 +210,12 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     try{
       const catalog=await discover(candidate,LOCAL_PROVIDER);
       if(!catalog.length)throw new Error('No compatible chat models found. The previous API is unchanged.');
-      return {models:catalog.map(m=>({...m,contextWindowEstimated:local.estimates[m.id],splashThinkingBudget:!!m.reasoning&&local.splashModels.includes(m.id),studio:local.studioModels.includes(m.id)})),note:local.note};
+      return {models:catalog.map(m=>({...m,contextWindowEstimated:local.estimates[m.id],splashThinkingBudget:!!m.reasoning&&local.splashModels.includes(m.id),studio:local.studioModels.includes(m.id),torc:local.torcModels.includes(m.id)})),note:local.note};
     }catch(e){if(original!==null)await fs.writeFile(modelFile,original);else await fs.rm(modelFile,{force:true});throw e;}
   }
+  // ToRc answers at most 4096 tokens when a request has no max_tokens, which truncates a long file write.
+  // It clamps a larger value to the room left in its context, so send the model's limit instead of omitting it.
+  const usesDefaultOutputCap=p=>(p?.models||[]).some(m=>m.torc);
   async function runner(chat) {
     if(meta.deletedChatIds?.includes(chat.id))throw new Error('This chat has been deleted.');
     if(engine?.state.installing)throw new Error('The engine is updating. Try again when it finishes.');
@@ -248,7 +251,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
       const activeWorkers=(chat.workerSlots||[]).map((slot,slotIndex)=>({...slot,slotIndex})).filter(slot=>slot.enabled!==false);
       const delegateAccess=!chat._worker&&activeWorkers.length?{url:`http://127.0.0.1:${http.address().port}/internal/chats/${chat.id}/delegate`,key:randomBytes(32).toString('hex'),workers:activeWorkers.map(slot=>({number:slot.slotIndex+1,model:slot.model,connection:meta.connections.find(c=>c.id===slot.connectionId)?.name||'Saved connection'}))}:undefined;
       const workerSessions=chat._worker?path.join(dataDir,'workers','sessions'):sessionDir;if(chat._worker)await fs.mkdir(workerSessions,{recursive:true});
-      const rpc=new Rpc({binary:selectedBinary(),cwd,agentDir:isolatedAgentDir,sessionDir:workerSessions,sessionId:chat.id,key:candidate,mode:chat.mode,extension,serverTimings:profile.provider==='local'&&profile.profile!=='generic',autoOutput:profile.provider==='local'&&profile.maxTokens==='auto',webAccess,skills:skillSet,stableTools:profile.provider==='local',declared:{mode:chat.declaredMode,web:chat.declaredWeb},delegateAccess});
+      const rpc=new Rpc({binary:selectedBinary(),cwd,agentDir:isolatedAgentDir,sessionDir:workerSessions,sessionId:chat.id,key:candidate,mode:chat.mode,extension,serverTimings:profile.provider==='local'&&profile.profile!=='generic',autoOutput:profile.provider==='local'&&profile.maxTokens==='auto'&&!usesDefaultOutputCap(profile),webAccess,skills:skillSet,stableTools:profile.provider==='local',declared:{mode:chat.declaredMode,web:chat.declaredWeb},delegateAccess});
       rpc.skillKey=skillKey;rpc.workerKey=JSON.stringify(chat.workerSlots||[]);rpc.delegateKey=delegateAccess?.key;
       rpc.webKey=webAccess?.key;
       rpc.webPending=0;
@@ -604,7 +607,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     if(!model)throw new Error('Connect a model first.');
     const sessions=path.join(dataDir,'one-shot');await fs.mkdir(sessions,{recursive:true});
     const sessionId='one-shot-'+randomUUID();
-    const temp=new Rpc({binary:selectedBinary(),cwd:chatCwd(chat),agentDir:path.join(dataDir,'runners',chat.id,'agent'),sessionDir:sessions,sessionId,key:rpc.keySnapshot,mode:'chat',autoOutput:rpc.boundConnection.provider==='local'&&rpc.boundConnection.maxTokens==='auto'});
+    const temp=new Rpc({binary:selectedBinary(),cwd:chatCwd(chat),agentDir:path.join(dataDir,'runners',chat.id,'agent'),sessionDir:sessions,sessionId,key:rpc.keySnapshot,mode:'chat',autoOutput:rpc.boundConnection.provider==='local'&&rpc.boundConnection.maxTokens==='auto'&&!usesDefaultOutputCap(meta.connections.find(c=>c.id===rpc.boundConnection?.id))});
     let timer;
     try{
       let failure=null;

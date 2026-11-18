@@ -9,7 +9,7 @@ import {initTerminalPanel} from './terminal-panel.mjs';
 import {initSkills} from './skills-panel.mjs';
 import {makeRuntime,reduceBackground,trackTool,collectInspector,updateThinking} from './chat-runtime.mjs';
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let config, current, projectId=null, ws, files=[], messages=[], streaming=null, running=false, started=0, chars=0, usage={}, stats={}, approval, generation=0, finalSeconds=0,followChat=true;
+let lastDeltaAt=0, config, current, projectId=null, ws, files=[], messages=[], streaming=null, running=false, started=0, chars=0, usage={}, stats={}, approval, generation=0, finalSeconds=0,followChat=true;
 const toolNodes=new Map();
 const chatStates=new Map();
 let promptTotal=0,workerProgress={};
@@ -385,7 +385,7 @@ function renderChat(){
 }
 function scrollBottom(){const area=$('#scroll-area');if(followChat)area.scrollTop=area.scrollHeight;}
 $('#scroll-area').addEventListener('scroll',e=>{followChat=atScrollEnd(e.currentTarget);});
-function setRunning(value,save=true){if(running&&!value)finalSeconds=(performance.now()-started)/1000;const changed=running!==value;running=value;$('#activity').classList.toggle('hidden',!value);$('#send').textContent=value?'■':'↑';$('#send').classList.toggle('running',value);$('#send').title=value?'Stop this reply':'Send message';$('#model').disabled=value;$('#thinking').disabled=value;$('#web-tools').disabled=value;$('#workers-button').disabled=value;$('#status').textContent=value?'Working':'Ready';if(value&&changed){started=performance.now();chars=0;usage={};finalSeconds=0;$('#activity-text').textContent='Waiting for model…';}if(streaming)mountActivity(streaming);updateMetrics();if(save)saveCurrentState();}
+function setRunning(value,save=true){if(running&&!value)finalSeconds=(performance.now()-started)/1000;const changed=running!==value;running=value;$('#activity').classList.toggle('hidden',!value);$('#send').textContent=value?'■':'↑';$('#send').classList.toggle('running',value);$('#send').title=value?'Stop this reply':'Send message';$('#model').disabled=value;$('#thinking').disabled=value;$('#web-tools').disabled=value;$('#workers-button').disabled=value;$('#status').textContent=value?'Working':'Ready';if(value&&changed){started=performance.now();lastDeltaAt=0;chars=0;usage={};finalSeconds=0;$('#activity-text').textContent='Waiting for model…';}if(streaming)mountActivity(streaming);updateMetrics();if(save)saveCurrentState();}
 function updateMetrics(){
   $('#activity').classList.toggle('hidden',!running||!!(streaming?.isThinking&&streaming.el?.querySelector('.thinking-box')));
   const seconds=running?(performance.now()-started)/1000:finalSeconds,estimated=!usage.output&&running,output=usage.output|| (running?Math.ceil(chars/4):stats.tokens?.output||0);
@@ -406,6 +406,8 @@ function updateMetrics(){
   $('#context').title=windowSize?'':'The server has not reported this model’s context limit yet.';
   $('#context-fill').style.width=percent+'%';
 }
+// Some servers, such as ToRc, send a tool call only when it is complete, so nothing streams while a long file is written.
+setInterval(()=>{if(!running||!streaming||!lastDeltaAt)return;const quiet=(performance.now()-lastDeltaAt)/1000;if(quiet>=5&&!$('#activity-text').textContent.startsWith('Still generating'))$('#activity-text').textContent='Still generating, nothing to show yet. A tool call, such as a file write, may only appear when it is finished.';},1000);
 setInterval(()=>{if(running)updateMetrics();},200);
 async function newChat(targetProjectId=projectId){try{saveCurrentState();const chat=await api('/chats',{projectId:targetProjectId,model:$('#model').value,webEnabled:!current&&$('#web-tools').checked});config.chats.unshift(chat);await openChat(chat);}catch(e){toast(e.message);}}
 async function openChat(chat){
@@ -476,7 +478,7 @@ function onEvent(e){
   }
   if(e.type==='message_update'){
     const a=e.assistantMessageEvent;if(e.usage){usage=e.usage;if(streaming)streaming.usage=e.usage;}
-    updateThinking(streaming,e.timing,performance.now());
+    updateThinking(streaming,e.timing,performance.now());lastDeltaAt=performance.now();
     if(streaming&&e.timing?.elapsedMs!==undefined)streaming.startedAt=Math.min(streaming.startedAt,performance.now()-e.timing.elapsedMs);
     if(streaming&&e.timing?.firstDeltaMs!==null&&e.timing?.firstDeltaMs!==undefined)streaming.generationStartedAt=streaming.startedAt+e.timing.firstDeltaMs;
     if(['text_delta','thinking_delta'].includes(a.type)){const think=a.type==='thinking_delta',block=streamingBlock(a.contentIndex,think?'thinking':'text');block[think?'thinking':'text']+=a.delta;chars+=a.delta.length;$('#activity-text').textContent=think?'Thinking…':'Writing a response…';$('#status').textContent=think?'Generating':'Writing';renderStream();}
