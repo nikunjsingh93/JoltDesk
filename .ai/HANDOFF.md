@@ -1,6 +1,12 @@
 # JoltDesk development handoff
 
-Updated November 17, 2026 by Claude Code.
+Updated November 18, 2026 by Claude Code.
+
+## ToRc context window and 0.14.10 (November 18, 2026)
+
+The user added the [ToRc](https://github.com/Rendeverance/ToRc) engine, started from `Start ToRc Qwen3.6-35B (fast).bat` (`torc-server <model> 8081 auto 131072 qwen3.6-35b-torc`). JoltDesk showed no context limit for it: `torc-server` lists only the model name at `/v1/models` (`owned_by: torc`), and no endpoint reports the window, so it was an unconfirmed estimate and the meter hides those. Added `torcContextFromCommandLine()` and `torcLaunchContext()` in `connections.mjs`. For a loopback URL on Windows, PowerShell finds the listening process and the 4th launch argument is the window. It runs only when a model is `owned_by: torc` and no Context window override is set. A remote ToRc or a non-Windows host still needs the override. An upstream `context_length` field in ToRc's `/v1/models` would make this unnecessary.
+
+Verification: `npm test` passed 55 tests with one existing skip; `test/launch-context.test.mjs` covers the parser and the loopback-only rule. A stand-in process named `torc-server.exe` returned 131072 for its port and null for an unused port. Not tried against the user's real ToRc server, and the packaged app was not launched. Published [0.14.10](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.14.10) from commit `8151f91`; GitHub reports SHA-256 `bc0359b5482c0a8737df1d3f38cc749979b6de632f1c894de185c12177131879` for the ARM64 zip, matching the local artifact. Next: user-test with the ToRc launcher and reconnect the API.
 
 ## Router context window and 0.14.9 (November 17, 2026)
 
