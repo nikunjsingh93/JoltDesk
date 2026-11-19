@@ -23,3 +23,11 @@ test('ToRc: only local servers are inspected',async()=>{
   assert.equal(await torcLaunchContext('http://192.168.1.5:8081/v1',run),null);
   assert.equal(ran,false);
 });
+
+import {torcVisionFromSettings} from '../connections.mjs';
+test('ToRc: image support follows the TORC_MMPROJ switch in /torc/settings',()=>{
+  assert.equal(torcVisionFromSettings({switches:{TORC_NPU:'1',TORC_MMPROJ:'<path>'}}),true);
+  assert.equal(torcVisionFromSettings({switches:{TORC_NPU:'1'}}),false);
+  assert.equal(torcVisionFromSettings({switches:{TORC_MMPROJ:''}}),false);
+  assert.equal(torcVisionFromSettings(null),false);
+});

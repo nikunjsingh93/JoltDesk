@@ -50,6 +50,12 @@ export async function torcLaunchContext(baseUrl,run=(cmd,args)=>new Promise(res=
   const script=`$c=Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue|Where-Object{$_.OwningProcess}|Select-Object -First 1;if($c){(Get-CimInstance Win32_Process -Filter "ProcessId=$($c.OwningProcess)").CommandLine}`;
   return torcContextFromCommandLine(await run('powershell.exe',['-NoProfile','-NonInteractive','-Command',script]));
 }
+// ToRc's /v1/models does not say whether it reads images. /torc/settings lists the switches it runs with,
+// and TORC_MMPROJ (the vision projector) appears there only when one is configured.
+export function torcVisionFromSettings(settings){
+  const v=settings&&typeof settings==='object'?settings.switches?.TORC_MMPROJ:null;
+  return typeof v==='string'&&v.length>0;
+}
 export function studioVisionFor(status,model){
   if(!status||typeof status!=='object')return null;
   const names=[model.id,model.name,model.root].filter(Boolean);
@@ -119,6 +125,8 @@ export async function discoverLocal(connection,key,fetcher=fetch){
     }
   }));
   const torcContext=raw.some(m=>m.owned_by==='torc')&&!ctxOverride?await torcLaunchContext(base):null;
+  let torcVision=false;
+  if(raw.some(m=>m.owned_by==='torc'))try{torcVision=torcVisionFromSettings(await request(root+'/torc/settings'));}catch{}
   const thinkingTokenBudget=optionalInteger(connection.thinkingTokenBudget,'Thinking token budget',0);
   const models=raw.map(m=>{
     const id=m.id||m.name;
@@ -144,7 +152,7 @@ export async function discoverLocal(connection,key,fetcher=fetch){
       m.reasoning===true||m.reasoning?.thinks===true||m.reasoning?.efforts?.length>0||m.supports_reasoning===true||p.supports_reasoning===true||unslothEfforts?.length>0||/enable_thinking|<think>/.test(p.chat_template||'')||(/qwen3|qwq|deepseek.*r1|gpt-oss/i.test(id+' '+(m.root||''))&&!/coder|instruct-2507/i.test(id)));
     const llama=connection.profile!=='generic';
     const capabilities=Array.isArray(m.capabilities)?m.capabilities.map(String):[];
-    const vision=p.modalities?.vision||m.vision===true||m.input_modalities?.includes('image')||m.input?.includes('image')||
+    const vision=p.modalities?.vision||(m.owned_by==='torc'&&torcVision)||m.vision===true||m.input_modalities?.includes('image')||m.input?.includes('image')||
       capabilities.some(c=>/^(vision|image|images|image_input)$/i.test(c))||
       (unsloth&&(studioVisionFor(studio,{id,name:m.name,root:m.root})??studioVision.get(id)??/(^|[-_/])VL([-_.]|$)/i.test(id)));
     const model={id,name:m.name||id,reasoning,input:vision?['text','image']:['text'],
