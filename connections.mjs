@@ -149,7 +149,7 @@ export async function discoverLocal(connection,key,fetcher=fetch){
     const maxTokens=autoOutput?contextWindow:maxOverride||Math.min(4096,Math.max(1,Math.floor(contextWindow/2)));
     if(maxTokens>contextWindow)throw new Error(`Max output tokens exceeds the context window for ${id}. Set a context window explicitly.`);
     const reasoning=connection.thinking==='on'||connection.thinking!=='off'&&(
-      m.reasoning===true||m.reasoning?.thinks===true||m.reasoning?.efforts?.length>0||m.supports_reasoning===true||p.supports_reasoning===true||unslothEfforts?.length>0||/enable_thinking|<think>/.test(p.chat_template||'')||(/qwen3|qwq|deepseek.*r1|gpt-oss/i.test(id+' '+(m.root||''))&&!/coder|instruct-2507/i.test(id)));
+      m.reasoning===true||m.reasoning?.thinks===true||m.reasoning?.efforts?.length>0||m.supports_reasoning===true||p.supports_reasoning===true||unslothEfforts?.length>0||m.owned_by==='torc'||/enable_thinking|<think>/.test(p.chat_template||'')||(/qwen3|qwq|deepseek.*r1|gpt-oss/i.test(id+' '+(m.root||''))&&!/coder|instruct-2507/i.test(id)));
     const llama=connection.profile!=='generic';
     const capabilities=Array.isArray(m.capabilities)?m.capabilities.map(String):[];
     const vision=p.modalities?.vision||(m.owned_by==='torc'&&torcVision)||m.vision===true||m.input_modalities?.includes('image')||m.input?.includes('image')||

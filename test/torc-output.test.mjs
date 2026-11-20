@@ -33,6 +33,8 @@ async function requestBody(owner){
     const api=async(route,body,method=body?'POST':'GET')=>{const r=await fetch(server.url+'/api'+route,{method,headers:{'Content-Type':'application/json','X-Bolt-Token':server.token},body:body?JSON.stringify(body):undefined});const result=await r.json();assert.equal(r.status,200,JSON.stringify(result));return result;};
     const config=await api('/connect',{provider:'local',baseUrl:fixture.url,remember:true});
     assert.equal(config.models[0].torc,owner==='torc');
+    // ToRc has no /props and names no reasoning flag, but it honours enable_thinking, so every ToRc model offers thinking.
+    assert.equal(config.models[0].reasoning,owner==='torc');
     await api('/model',{modelId:'mock-model'});
     const chat=await api('/chats',{});await api('/chats/'+chat.id,{model:'mock-model',thinking:'off'},'PATCH');
     ws=new WebSocket(server.url.replace('http','ws')+`/stream?chat=${chat.id}&token=${server.token}`);await new Promise((r,j)=>{ws.once('open',r);ws.once('error',j);});ws.on('message',d=>events.push(JSON.parse(d)));

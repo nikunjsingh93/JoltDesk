@@ -164,6 +164,14 @@ function createBrowserPane({window,appOrigin,checkAgentUrl}){
     createTab,waitForLoad,
     reveal:()=>emit({type:'reveal'}),
     isAttached:tab=>tab.attached,
+    // Shows a minimized or hidden window without focusing it while fn runs, then puts it back.
+    withWindowShown:async fn=>{
+      const minimized=window.isMinimized(),hidden=!window.isVisible();
+      if(!minimized&&!hidden)return fn();
+      window.showInactive();
+      try{await new Promise(r=>setTimeout(r,300));return await fn();}
+      finally{if(!window.isDestroyed()){if(minimized)window.minimize();else if(hidden)window.hide();}}
+    },
     // Attaches a tab at its last position even if the page has not reported a layout,
     // falling back to the right part of the window.
     forceShow:tab=>{

@@ -89,7 +89,7 @@ async function resolveAgentUrl(value,{allowFiles,checkPublic}){
   return checkPublic(url.href);
 }
 
-function createBrowserAgent({getActiveTab,createTab,waitForLoad,reveal,isAttached,forceShow}){
+function createBrowserAgent({getActiveTab,createTab,waitForLoad,reveal,isAttached,forceShow,withWindowShown=fn=>fn()}){
   const call=(tab,fn,...args)=>tab.view.webContents.executeJavaScriptInIsolatedWorld(WORLD,[{code:`(${fn})(${args.map(a=>JSON.stringify(a)).join(',')})`}]);
   const readable=url=>/^(https?|file):/i.test(url);
   async function activeTab(){
@@ -180,6 +180,9 @@ function createBrowserAgent({getActiveTab,createTab,waitForLoad,reveal,isAttache
         // An empty capture means the page view is not on the window yet, for example
         // while the window is hidden. Put it back where it was shown last and retry.
         if(!image||image.isEmpty()){forceShow(tab);await sleep(500);image=await capture();}
+        // A page that has never been drawn has no frame to copy while the window is minimized
+        // or hidden. Show the window without taking focus just long enough to capture it.
+        if(!image||image.isEmpty())image=await withWindowShown(async()=>{forceShow(tab);await sleep(700);return capture();});
         if(!image||image.isEmpty())throw new Error('The browser could not take a screenshot of this page. Show the JoltDesk window and try again.');
         if(image.getSize().width>1280)image=image.resize({width:1280});
         checkPage(tab);
