@@ -1,6 +1,14 @@
 # JoltDesk development handoff
 
-Updated November 18, 2026 by Claude Code.
+Updated November 20, 2026 by Claude Code.
+
+## ToRc thinking, minimized screenshots and 0.14.13 (November 20, 2026)
+
+Thinking: the user could not see thinking for Ornith on ToRc. ToRc has no `/props`, lists no reasoning flag, and the name `ornith-1.5-35b-torc` matches no thinking pattern, so JoltDesk set `reasoning: false`, which hides the thinking control and sends no `enable_thinking`. Every `owned_by: torc` model is now `reasoning: true`. Measured on the user's Ornith (port 8084): ToRc streams `reasoning_content` even with no setting, and the engine emitted thinking events with the old code too, so the missing text itself was not reproduced. With the fix the control shows and `off` gives zero thinking events. Not checked in the old screen, so if thinking text is still missing, inspect the rendering. Qwen3.6-35B and Qwen3.8-27B matched the name pattern already. Only Ornith was running for the test.
+
+Screenshots: in the user's koi chat, `browser_screenshot` failed with "Show the JoltDesk window". Reproduced with the user's `koi.html`: it fails when JoltDesk is minimized before the page is ever opened (never drawn, so no frame to copy; a minimized window also reports a 0 by 0 content size). A CDP capture also times out there. `browser-agent.cjs` now ends with `withWindowShown()` from `browser-pane.cjs`: `showInactive()` without focus, capture, then minimize or hide again. The window flashes briefly in that case only. A page drawn before minimizing still captures without restoring the window. A full-screen cover window did not reproduce a failure.
+
+Verification: `npm test` passed 57 tests with one existing skip (one multiple-apis failure in a parallel run passed alone and on rerun); new `test/browser-minimized-first-ui-check.mjs` passes and fails without the fix; `browser-actions-ui-check` and `ui-check` passed. Not tried in the packaged app or the user's running window. Published [0.14.13](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.14.13) from commit `791028c`; GitHub reports SHA-256 `76e358ee84001613e84d849ebadc6ebabf0dc9b5112f60b56eb20ca34a2cd121` for the ARM64 zip, matching the local artifact. Next: user-test thinking on ToRc after reconnecting, and a screenshot with JoltDesk minimized.
 
 ## ToRc image support and 0.14.12 (November 18, 2026)
 
