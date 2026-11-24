@@ -1,12 +1,14 @@
 # JoltDesk development handoff
 
+Updated November 24, 2026.
+
 ## Inkling 2 Mini reasoning efforts (November 24, 2026)
 
 Added Inkling 2 Mini detection for llama.cpp-style local connections and a per-chat dropdown for None, Minimal, Low, Medium, High, Extra high and Max. Pi-Bolt sends the selected value in `chat_template_kwargs.reasoning_effort`; None is labeled accurately because it does not guarantee that reasoning stops. `server.mjs` preserves the label when Pi-Bolt returns its catalog. Reconnect the saved API to refresh its catalog. Recognition requires Inkling in the server's model ID, name, root or aliases.
 
 Verification: `npm test` passed 59 tests with one existing skip. `test/inkling-thinking-ui-check.mjs`, `test/unsloth-thinking-ui-check.mjs` and `test/ui-check.mjs` passed. The new tests cover discovery, all seven values through real Pi-Bolt and a mock server, UI, persistence and another model. The packaged 0.14.14 ARM64 app opened with an isolated profile. The user supplied a live endpoint, but it returned HTTP 401 and this environment could not decrypt the saved desktop credential. Live `/apply-template` and generation therefore remain unverified. Next: authenticate against an explicitly supplied test endpoint and confirm its Inkling template maps the selected levels, including None, then verify in the user's running app.
 
-Updated November 20, 2026 by Claude Code.
+Published [0.14.14](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.14.14) from commit `1758fe8`. The Windows ARM64 ZIP's SHA-256 is `1d9910ee047a4e4221e42ffd55fae52133df82437eaba2d12e9f8edf43fa07e8`, confirmed against GitHub's uploaded asset.
 
 ## ToRc thinking, minimized screenshots and 0.14.13 (November 20, 2026)
 
