@@ -135,6 +135,8 @@ export async function discoverLocal(connection,key,fetcher=fetch){
     // Never let its template, image support or context leak into a different model.
     const p=reportedProps.model_alias&&![id,m.name,m.root,...(Array.isArray(m.aliases)?m.aliases:[])].includes(reportedProps.model_alias)?{}:reportedProps;
     const unsloth=m.owned_by==='unsloth-studio';
+    // Inkling's template reads reasoning_effort, not enable_thinking.
+    const inkling=connection.profile!=='generic'&&/inkling[-_. ]?2[-_. ]?mini/i.test([id,m.name,m.root,...(Array.isArray(m.aliases)?m.aliases:[])].filter(Boolean).join(' '));
     // Studio's OpenAI catalog can omit reasoning flags even though its Qwen3.8
     // template supports the documented low/medium/xhigh efforts. Explicit
     // server metadata takes precedence, including an empty list (on/off only).
@@ -149,7 +151,7 @@ export async function discoverLocal(connection,key,fetcher=fetch){
     const maxTokens=autoOutput?contextWindow:maxOverride||Math.min(4096,Math.max(1,Math.floor(contextWindow/2)));
     if(maxTokens>contextWindow)throw new Error(`Max output tokens exceeds the context window for ${id}. Set a context window explicitly.`);
     const reasoning=connection.thinking==='on'||connection.thinking!=='off'&&(
-      m.reasoning===true||m.reasoning?.thinks===true||m.reasoning?.efforts?.length>0||m.supports_reasoning===true||p.supports_reasoning===true||unslothEfforts?.length>0||m.owned_by==='torc'||/enable_thinking|<think>/.test(p.chat_template||'')||(/qwen3|qwq|deepseek.*r1|gpt-oss/i.test(id+' '+(m.root||''))&&!/coder|instruct-2507/i.test(id)));
+      inkling||m.reasoning===true||m.reasoning?.thinks===true||m.reasoning?.efforts?.length>0||m.supports_reasoning===true||p.supports_reasoning===true||unslothEfforts?.length>0||m.owned_by==='torc'||/enable_thinking|<think>/.test(p.chat_template||'')||(/qwen3|qwq|deepseek.*r1|gpt-oss/i.test(id+' '+(m.root||''))&&!/coder|instruct-2507/i.test(id)));
     const llama=connection.profile!=='generic';
     const capabilities=Array.isArray(m.capabilities)?m.capabilities.map(String):[];
     const vision=p.modalities?.vision||(m.owned_by==='torc'&&torcVision)||m.vision===true||m.input_modalities?.includes('image')||m.input?.includes('image')||
@@ -170,6 +172,12 @@ export async function discoverLocal(connection,key,fetcher=fetch){
       if(efforts?.length){
         model.thinkingLevelMap=Object.fromEntries(['off','minimal','low','medium','high','xhigh','max'].map(l=>[l,l==='off'?'none':efforts.includes(l)?l:null]));
         model.samplingParamsByThinkingLevel=Object.fromEntries(['off',...efforts].map(l=>[l,{reasoning_effort:l==='off'?'none':l,...(unsloth?{enable_thinking:l!=='off'}:{}),chat_template_kwargs:{enable_thinking:l!=='off',...(unsloth&&l!=='off'?{reasoning_effort:l}:{})}}]));
+      }
+      if(inkling){
+        const levels=['off','minimal','low','medium','high','xhigh','max'];
+        model.thinkingLevelMap=Object.fromEntries(levels.map(l=>[l,l==='off'?'none':l]));
+        model.samplingParamsByThinkingLevel=Object.fromEntries(levels.map(l=>[l,{chat_template_kwargs:{reasoning_effort:l==='off'?'none':l}}]));
+        model.thinkingOffLabel='Thinking · None';
       }
       if(thinkingTokenBudget!==null&&m.owned_by==='splash')model.samplingParams={...model.samplingParams,thinking_token_budget:thinkingTokenBudget};
     }

@@ -100,7 +100,8 @@ function renderThinking(levels,level){
   const supported=capable&&levels.some(l=>l!=='off');
   const previous=$('#thinking').value;
   $('#thinking').classList.toggle('hidden',!supported);$('#thinking').disabled=running||!supported;
-  $('#thinking').innerHTML=levels.map(l=>`<option value="${l}">${l==='off'?'Thinking off':config.connection?.provider==='local'&&levels.length===2?'Thinking on':'Thinking · '+({minimal:'Minimal',low:'Low',medium:'Medium',high:'High',xhigh:'Extra high',max:'Max'}[l]||l)}</option>`).join('');
+  $('#thinking').innerHTML=levels.map(l=>`<option value="${l}">${l==='off'?(model?.thinkingOffLabel||'Thinking off'):config.connection?.provider==='local'&&levels.length===2?'Thinking on':'Thinking · '+({minimal:'Minimal',low:'Low',medium:'Medium',high:'High',xhigh:'Extra high',max:'Max'}[l]||l)}</option>`).join('');
+  $('#thinking').title=model?.thinkingOffLabel?'None requests minimum effort; Inkling can still reason.':'';
   const selected=current?.thinking||level||previous;
   $('#thinking').value=levels.includes(selected)?selected:levels.includes('medium')?'medium':levels[0];
 }

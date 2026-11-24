@@ -210,7 +210,7 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
     try{
       const catalog=await discover(candidate,LOCAL_PROVIDER);
       if(!catalog.length)throw new Error('No compatible chat models found. The previous API is unchanged.');
-      return {models:catalog.map(m=>({...m,contextWindowEstimated:local.estimates[m.id],splashThinkingBudget:!!m.reasoning&&local.splashModels.includes(m.id),studio:local.studioModels.includes(m.id),torc:local.torcModels.includes(m.id)})),note:local.note};
+      return {models:catalog.map(m=>({...m,thinkingOffLabel:local.definition.models.find(d=>d.id===m.id)?.thinkingOffLabel,contextWindowEstimated:local.estimates[m.id],splashThinkingBudget:!!m.reasoning&&local.splashModels.includes(m.id),studio:local.studioModels.includes(m.id),torc:local.torcModels.includes(m.id)})),note:local.note};
     }catch(e){if(original!==null)await fs.writeFile(modelFile,original);else await fs.rm(modelFile,{force:true});throw e;}
   }
   // ToRc answers at most 4096 tokens when a request has no max_tokens, which truncates a long file write.
