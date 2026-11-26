@@ -8,6 +8,8 @@ With Unsloth Studio, a vision model did not receive a `browser_screenshot`: the 
 
 Verification: `npm test` passed 61 tests with one existing skip. The new `test/unsloth-vision.test.mjs` uses real Pi-Bolt with a mock Studio, and both cases failed without the fix. UI checks, the packaged app and the user's live Studio were not tested. Not covered: a model that Studio has not loaded when the prompt is sent, and the composer still refuses an attachment while the saved profile says text-only. Why discovery first reported text-only is unknown. Image detection for llama.cpp servers that list several models was not investigated. Next: user-test an image and a screenshot with Studio in 0.14.15.
 
+Published [0.14.15](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.14.15) from commit `c30c650`. Before publishing, `npm test` passed 61 tests with one existing skip and `test/packaged-check.mjs` passed against the ARM64 build in `release-build`. GitHub reports SHA-256 `27f3538c46d7bfc21ae674db91fabcc838ef94dfe240240fb4006487d73dba79` for the ARM64 zip, matching the local artifact.
+
 ## Inkling 2 Mini reasoning efforts (November 24, 2026)
 
 Added Inkling 2 Mini detection for llama.cpp-style local connections and a per-chat dropdown for None, Minimal, Low, Medium, High, Extra high and Max. Pi-Bolt sends the selected value in `chat_template_kwargs.reasoning_effort`; None is labeled accurately because it does not guarantee that reasoning stops. `server.mjs` preserves the label when Pi-Bolt returns its catalog. Reconnect the saved API to refresh its catalog. Recognition requires Inkling in the server's model ID, name, root or aliases.
