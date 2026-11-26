@@ -4,6 +4,19 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
 const MAX_SNAPSHOT_BYTES=5*1024*1024;
+// A shell command returns nothing until it ends, so one that never finishes stalls the reply.
+const SHELL_TIMEOUT_SECONDS=Number(process.env.BOLT_SHELL_TIMEOUT)||300;
+// Searches that start at the filesystem or a drive root. This catches the usual forms
+// that models write; it is not a security boundary. The time limit covers the rest.
+const DISK_ROOT=String.raw`(?:\/(?:[a-z]\/?)?|[a-z]:[\\\/]?)`;
+const ROOT_ARG=String.raw`(?:"${DISK_ROOT}"|'${DISK_ROOT}'|${DISK_ROOT})(?=\s|$|[;&|)])`;
+const FIND_FROM_ROOT=new RegExp(String.raw`(?:^|[;&|(\n])\s*(?:sudo\s+)?find\s+(?:-[HLP]\s+)*${ROOT_ARG}`,'i');
+const RECURSE_FROM_ROOT=new RegExp(String.raw`(?:^|[;&|(\n])\s*(?:Get-ChildItem|gci|ls|dir)\b(?=[^;|\n]*\s-r(?:ecurse)?\b)[^;|\n]*?\s(?:"[a-z]:[\\\/]?"|'[a-z]:[\\\/]?'|[a-z]:[\\\/]?)(?=\s|$|[;&|)])`,'i');
+export function searchesWholeDisk(tool: string,command: string){
+  if(tool==='powershell')return RECURSE_FROM_ROOT.test(command);
+  // A shallow find from a root finishes quickly.
+  return command.split(/[;&|\n]/).some(part=>FIND_FROM_ROOT.test(part)&&!/\s-maxdepth\s+[1-3]\b/.test(part));
+}
 
 // Shorter wording for the engine's built-in tools. Every request uses the same text,
 // so the server's prompt cache still matches. Limits and editing rules are kept.
@@ -11,8 +24,8 @@ const COMPACT_TOOLS: Record<string,{description:string,parameters:Record<string,
   read:{description:'Read a text or image file. Text output stops at 2000 lines or 50KB; continue with offset and limit.',parameters:{path:'File path',offset:'First line, starting at 1',limit:'Maximum lines'}},
   write:{description:'Create or overwrite a file. Parent folders are created.',parameters:{path:'File path',content:'Full file content'}},
   edit:{description:'Replace exact text in one file. Each oldText must match a unique part of the original file and must not overlap another edit; merge nearby changes into one edit.',parameters:{path:'File path',edits:'Replacements, each matched against the original file'},items:{oldText:'Exact, unique text to replace',newText:'Replacement text'}},
-  bash:{description:'Run a bash command in the working folder. Returns stdout and stderr, cut to the last 2000 lines or 50KB.',parameters:{command:'Command to run',timeout:'Timeout in seconds (optional)'}},
-  powershell:{description:'Run a PowerShell command in the working folder. Returns stdout and stderr, cut to the last 2000 lines or 50KB.',parameters:{command:'Command to run',timeout:'Timeout in seconds (optional)'}},
+  bash:{description:'Run a bash command in the working folder. Returns stdout and stderr, cut to the last 2000 lines or 50KB, only after the command ends. Never search the whole disk.',parameters:{command:'Command to run',timeout:'Timeout in seconds (default 300)'}},
+  powershell:{description:'Run a PowerShell command in the working folder. Returns stdout and stderr, cut to the last 2000 lines or 50KB, only after the command ends. Never search the whole disk.',parameters:{command:'Command to run',timeout:'Timeout in seconds (default 300)'}},
   grep:{description:'Search file contents, respecting .gitignore. Returns path, line number and text, up to 100 matches.',parameters:{pattern:'Regex, or plain text with literal',path:'Folder or file (default: working folder)',glob:'File filter, such as *.ts or src/**/*.ts',ignoreCase:'Ignore case',literal:'Treat pattern as plain text',context:'Lines of context around each match',limit:'Maximum matches (default 100)'}},
   find:{description:'Find files by glob pattern, respecting .gitignore. Up to 1000 results.',parameters:{pattern:'Glob, such as **/*.json',path:'Folder (default: working folder)',limit:'Maximum results'}},
   ls:{description:'List a folder, including dotfiles. Folders end with /. Up to 500 entries.',parameters:{path:'Folder (default: working folder)',limit:'Maximum entries'}}
@@ -222,6 +235,9 @@ export default function(pi: any) {
       browserApproved=true;
     }
     if(!['write','edit','bash','powershell'].includes(event.toolName))return;
+    const shell=event.toolName==='bash'||event.toolName==='powershell';
+    // Checked before approval, so the user is not asked about a command that cannot run.
+    if(shell&&searchesWholeDisk(event.toolName,String(event.input?.command??'')))return {block:true,reason:'Not run: this command searches the whole disk, which can take many minutes. No part of it ran. Search a specific folder instead, such as the working folder or the folder the user named. If you already know where the file is likely to be, list that folder first and read the result before searching further.'};
     if(mode!=='bypass'){
       if(mode!=='ask')return {block:true,reason:'File edits and commands are disabled in this permission mode.'};
       const allowed=await ctx.ui.confirm(`Allow ${event.toolName}?`,JSON.stringify(event.input,null,2));
@@ -230,6 +246,7 @@ export default function(pi: any) {
     // Record the file's exact bytes before an approved edit so the app can show and undo it.
     if(event.toolName==='write'||event.toolName==='edit')ctx.ui.notify('BOLT_SNAPSHOT:'+JSON.stringify(snapshot(event.input,ctx)),'info');
     else ctx.ui.notify('BOLT_SNAPSHOT:'+JSON.stringify({command:event.toolName}),'info');
+    if(shell&&event.input&&!(Number(event.input.timeout)>0))event.input.timeout=SHELL_TIMEOUT_SECONDS;
   });
   pi.registerCommand('bolt-note',{description:'Add an app note to the conversation context',handler:async(args:string)=>{
     pi.sendMessage({customType:'bolt-note',content:args.trim(),display:false});
