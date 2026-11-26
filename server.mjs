@@ -126,12 +126,13 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
   }
   async function refreshStudioContext(chat,rpc){
     const profile=meta.connections.find(c=>c.id===rpc.boundConnection?.id);
-    if(!profile||profile.provider!=='local'||profile.contextWindow)return;
+    if(!profile||profile.provider!=='local')return;
     const model=(profile.models||[]).find(m=>m.id===chat.model);
     // Models saved before this check existed have no studio flag yet, so they are checked too.
     if(!model||model.studio===false)return;
     const status=await studioStatus(profile,rpc.keySnapshot);
-    const size=studioContextFor(status,model),vision=studioVisionFor(status,model);
+    // A context window set by the user stays; image support still follows the server.
+    const size=profile.contextWindow?null:studioContextFor(status,model),vision=studioVisionFor(status,model);
     const sizeChanged=!!size&&(size!==model.contextWindow||!!model.contextWindowEstimated);
     const visionChanged=typeof vision==='boolean'&&vision!==!!model.input?.includes('image');
     if(!sizeChanged&&!visionChanged)return;
@@ -808,6 +809,9 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
       // Opening a chat whose API is offline should not report an error until the user sends something.
       try{rpc=await runner(chat);}catch(error){if(msg.type==='levels')return;throw error;}
       if(msg.type==='prompt'){
+        // The engine reads image support only when it starts. Finish the Studio check first,
+        // so a change restarts the engine before this request instead of after it.
+        if(!rpc.busy){await refreshStudioContext(chat,rpc).catch(()=>{});rpc=await runner(chat);}
         if(/^\s*\/bolt-(permissions|capabilities|web)\b/.test(msg.message||''))throw new Error('Use the chat controls to change tool permissions.');
         if(!rpc.models.length||(rpc.boundConnection.provider==='openai'&&!rpc.keySnapshot))throw new Error('Connect this chat’s model API in Settings first.');
         if(rpc.busy)throw new Error('A response is already running.');

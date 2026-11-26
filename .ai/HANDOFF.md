@@ -1,6 +1,12 @@
 # JoltDesk development handoff
 
-Updated November 24, 2026.
+Updated November 26, 2026.
+
+## Studio image support before the first request (November 26, 2026, 0.14.15)
+
+With Unsloth Studio, a vision model did not receive a `browser_screenshot`: the runner's catalog said text-only, while the saved profile later said text and image. `server.mjs` started the Studio vision check without waiting, and a busy runner keeps its old catalog. The prompt handler now awaits the check and restarts the runner before sending if support changed. A user-set context window no longer skips the vision update. This can delay a prompt by up to the 8-second status timeout when Studio does not answer.
+
+Verification: `npm test` passed 61 tests with one existing skip. The new `test/unsloth-vision.test.mjs` uses real Pi-Bolt with a mock Studio, and both cases failed without the fix. UI checks, the packaged app and the user's live Studio were not tested. Not covered: a model that Studio has not loaded when the prompt is sent, and the composer still refuses an attachment while the saved profile says text-only. Why discovery first reported text-only is unknown. Image detection for llama.cpp servers that list several models was not investigated. Next: user-test an image and a screenshot with Studio in 0.14.15.
 
 ## Inkling 2 Mini reasoning efforts (November 24, 2026)
 
