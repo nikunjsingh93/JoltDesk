@@ -8,6 +8,8 @@ A model ran a folder listing and `find /` in one command. The listing already ha
 
 Verification: `npm test` passed 63 tests with one existing skip. The new `test/shell-guard.test.mjs` passed with the bundled engine, and a temporary copy passed with Pi-Bolt 1.3.1. Not tested in the packaged app, with a live model, or with the PowerShell tool through the engine (its pattern is covered). Next: user-test with a live model in 0.14.16.
 
+Published [0.14.16](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.14.16) from commit `3547082`. Before publishing, `npm test` passed 63 tests with one existing skip, `test/packaged-check.mjs` passed against the ARM64 build in `release-build`, and the packaged `approval.ts` matched the source. GitHub reports SHA-256 `849198f307ad41ecf133754143e539eb526d3f9fb70aa2ce8b48bc7d378c4a3e` for the ARM64 zip, matching the local artifact.
+
 ## Studio image support before the first request (November 26, 2026, 0.14.15)
 
 With Unsloth Studio, a vision model did not receive a `browser_screenshot`: the runner's catalog said text-only, while the saved profile later said text and image. `server.mjs` started the Studio vision check without waiting, and a busy runner keeps its old catalog. The prompt handler now awaits the check and restarts the runner before sending if support changed. A user-set context window no longer skips the vision update. This can delay a prompt by up to the 8-second status timeout when Studio does not answer.
