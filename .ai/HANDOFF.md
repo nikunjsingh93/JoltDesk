@@ -8,6 +8,8 @@ The chat now stays at the bottom when new blocks grow the message list, includin
 
 Verification: `npm test` passed 63 tests with one existing skip. The packaged streaming check passed on 0.14.18 and reproduced the lost follow on 0.14.17. The packaged smoke check also passed on Windows ARM64.
 
+Published [JoltDesk 0.14.18](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.14.18) from `a48ef75`. The GitHub ZIP matches the local SHA-256 `63c19f28e3f44f4a289582ad4295e299f5a1f79ea5ba76cc49b5cc4b7b765849`.
+
 ## Attachment preflight and Ornith image marker error (November 27, 2026)
 
 Published [JoltDesk 0.14.17](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.14.17) from commit `3d5266b`. The Windows ARM64 packaged smoke test passed, including immediate AVIF rejection with the draft intact and zero model requests. GitHub's ZIP SHA-256 matches the local archive, `054d3e7f35b1df20f4a4b808639dee615b8c2cab3b3cb1aa8a2d2805b18a325d`.
