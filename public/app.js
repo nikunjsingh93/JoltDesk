@@ -387,6 +387,11 @@ function renderChat(){
 }
 function scrollBottom(){const area=$('#scroll-area');if(followChat)area.scrollTop=area.scrollHeight;}
 $('#scroll-area').addEventListener('scroll',e=>{followChat=atScrollEnd(e.currentTarget);});
+// Layout can grow after a render, for example when an image finishes loading.
+// Keep following until the scroll position changes, not just because the bottom moves.
+const chatResize=new ResizeObserver(scrollBottom);
+chatResize.observe($('#messages'));
+chatResize.observe($('#scroll-area'));
 function setRunning(value,save=true){if(running&&!value)finalSeconds=(performance.now()-started)/1000;const changed=running!==value;running=value;$('#activity').classList.toggle('hidden',!value);$('#send').textContent=value?'■':'↑';$('#send').classList.toggle('running',value);$('#send').title=value?'Stop this reply':'Send message';$('#model').disabled=value;$('#thinking').disabled=value;$('#web-tools').disabled=value;$('#workers-button').disabled=value;$('#status').textContent=value?'Working':'Ready';if(value&&changed){started=performance.now();lastDeltaAt=0;chars=0;usage={};finalSeconds=0;$('#activity-text').textContent='Waiting for model…';}if(streaming)mountActivity(streaming);updateMetrics();if(save)saveCurrentState();}
 function updateMetrics(){
   $('#activity').classList.toggle('hidden',!running||!!(streaming?.isThinking&&streaming.el?.querySelector('.thinking-box')));
@@ -452,7 +457,6 @@ function streamingBlock(index,type){
 }
 let renderScheduled=false;
 function updateStreamNode(m){
-  followChat=followChat&&atScrollEnd($('#scroll-area'));
   messageNode(m,m.el);
   mountActivity(m);
   scrollBottom();

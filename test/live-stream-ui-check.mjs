@@ -10,7 +10,7 @@ const original=globalThis.fetch;globalThis.fetch=(url,opts)=>String(url)==='http
 const server=await startServer({dataDir:dir,autoStartUpdates:false}),env={...process.env,BOLT_TEST_URL:server.url,BOLT_DATA_DIR:dir};delete env.ELECTRON_RUN_AS_NODE;let app;
 try{
   const packaged=!!process.env.BOLT_TEST_PACKAGED;
-  app=await _electron.launch(packaged?{executablePath:'release/win-arm64-unpacked/JoltDesk.exe',args:[],env}:{args:['test/ui-shell.cjs'],env});
+  app=await _electron.launch(packaged?{executablePath:path.join(process.env.BOLT_TEST_BUILD_DIR||'release','win-arm64-unpacked','JoltDesk.exe'),args:[],env}:{args:['test/ui-shell.cjs'],env});
   if(packaged)await app.evaluate(()=>{
     const original=globalThis.fetch;
     globalThis.fetch=(url,options)=>String(url)==='https://api.openai.com/v1/models'?Promise.resolve(new Response('{"data":[{"id":"bolt-test"}]}')):original(url,options);
@@ -40,6 +40,27 @@ try{
   await replyCode.evaluate(el=>{el.scrollTop=el.scrollHeight;window.replyCodeCheck.length=el.textContent.length;});
   await page.waitForFunction(()=>document.querySelector('.answer-markdown pre').textContent.length>window.replyCodeCheck.length);
   assert.ok(await replyCode.evaluate(el=>el.scrollHeight-el.clientHeight-el.scrollTop<=2),'Returning to the bottom should follow new code');
+  const chat=page.locator('#scroll-area');
+  const bottomGap=()=>chat.evaluate(el=>el.scrollHeight-el.clientHeight-el.scrollTop);
+  const growReply=height=>page.locator('#messages').evaluate((el,height)=>{
+    let block=el.querySelector('[data-test-new-block]');
+    if(!block){block=document.createElement('div');block.dataset.testNewBlock='';el.append(block);}
+    block.style.height=height+'px';
+  },height);
+  await chat.evaluate(el=>{el.scrollTop=el.scrollHeight;});
+  await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+  await growReply(800);
+  await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+  await chat.evaluate(async el=>{el.scrollTop-=80;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
+  const readingTop=await chat.evaluate(el=>el.scrollTop);
+  assert.ok(await bottomGap()>=70,'The chat should be scrolled up before the next block grows');
+  await growReply(980);
+  await expect.poll(bottomGap).toBeGreaterThanOrEqual(180);
+  assert.equal(await chat.evaluate(el=>el.scrollTop),readingTop,'A growing reply moved the chat while reading above the bottom');
+  await chat.evaluate(async el=>{el.scrollTop=el.scrollHeight;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
+  await growReply(1160);
+  await expect.poll(bottomGap).toBeLessThanOrEqual(2);
+  await page.locator('[data-test-new-block]').evaluate(el=>el.remove());
   await expect(page.locator('#send')).not.toHaveClass(/running/,{timeout:15000});await expect(page.locator('.reply-metrics [data-stat="cost"]')).not.toBeVisible();
   const speed=Number.parseFloat((await page.locator('.reply-metrics [data-stat="speed"]').innerText()).replace(/^~/,''));assert.ok(speed>0&&speed<100);await expect(page.locator('.reply-metrics [data-stat="speed"]')).toContainText('~');
   provider.setAnswer();

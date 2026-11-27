@@ -2,6 +2,12 @@
 
 Updated November 27, 2026.
 
+## Follow the bottom during streaming (November 27, 2026)
+
+The chat now stays at the bottom when new blocks grow the message list, including changes that arrive after the streaming render. Scrolling up pauses following and returning to the bottom resumes it. The outer chat tracks scroll events and observes changes to the message list and viewport. `test/live-stream-ui-check.mjs` covers block growth, reading above the bottom and returning to it.
+
+Verification: `npm test` passed 63 tests with one existing skip. The packaged streaming check passed on 0.14.18 and reproduced the lost follow on 0.14.17. The packaged smoke check also passed on Windows ARM64.
+
 ## Attachment preflight and Ornith image marker error (November 27, 2026)
 
 Published [JoltDesk 0.14.17](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.14.17) from commit `3d5266b`. The Windows ARM64 packaged smoke test passed, including immediate AVIF rejection with the draft intact and zero model requests. GitHub's ZIP SHA-256 matches the local archive, `054d3e7f35b1df20f4a4b808639dee615b8c2cab3b3cb1aa8a2d2805b18a325d`.
