@@ -4,6 +4,8 @@ Updated November 27, 2026.
 
 ## Attachment preflight and Ornith image marker error (November 27, 2026)
 
+Published [JoltDesk 0.14.17](https://github.com/nikunjsingh93/JoltDesk/releases/tag/v0.14.17) from commit `3d5266b`. The Windows ARM64 packaged smoke test passed, including immediate AVIF rejection with the draft intact and zero model requests. GitHub's ZIP SHA-256 matches the local archive, `054d3e7f35b1df20f4a4b808639dee615b8c2cab3b3cb1aa8a2d2805b18a325d`.
+
 The Ornith ToRc process remained up, but the reply ended with the image marker error. The chat history contained five user image parts. The adjacent ToRc checkout's Qwen server takes the image rows out of the request state on first prompt expansion. After a reasoning cap, the same prompt can be expanded again with no rows. The proposed fix is to borrow the rows in `model/src/models/qwen/serve.rs` so both passes can use them. The ToRc edit was reverted and the test build removed at the user's request for a separate handoff. JoltDesk rejects unsupported files on selection, paste, or drop, validates again on the server, and keeps a provider error from turning into “Response complete” when the turn settles.
 
 Verification: JoltDesk `npm test` passed 63 with one existing skip. `node test/files-web-ui-check.mjs` passed, including immediate AVIF rejection and draft preservation. The proposed ToRc fix built and passed its five Qwen vision unit tests before it was removed. The running apps were left in place. Next: hand off the ToRc fix for isolated reasoning-cap verification with images, and verify the attachment behavior in the user's next JoltDesk build.
