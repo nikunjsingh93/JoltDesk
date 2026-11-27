@@ -1,4 +1,5 @@
 import {displayMetrics,elapsedText} from './reply-metrics.mjs';
+import {attachmentKind,imageExtensions,unsupportedAttachment} from './attachment-types.mjs';
 import {partialStringField,readableArguments} from './stream-content.mjs';
 import {initBrowserPanel} from './browser-panel.mjs';
 import {initSidePanel,panelMode} from './side-panel.mjs';
@@ -502,7 +503,11 @@ function onEvent(e){
   if(['tool_execution_update','tool_execution_end'].includes(e.type)){
     const d=toolNodes.get(e.toolCallId);if(d){const result=e.result||e.partialResult;d.querySelector('pre').textContent=(result?.content||[]).map(c=>c.text||'').join('\n');showToolImages(d,result?.content);if(e.type==='tool_execution_end'){d.querySelector('summary').textContent=`${e.isError?'✕':'✓'} ${e.toolName} · ${e.durationMs!=null?(e.durationMs/1000).toFixed(2)+'s':'finished'}`;d.open=false;}}scrollBottom();
   }
-  if(e.type==='agent_settled'){setRunning(false);streaming=null;$('#status').textContent=messages.findLast(m=>m.role==='assistant')?.stopReason==='aborted'?'Stopped':'Response complete';}
+  if(e.type==='agent_settled'){
+    setRunning(false);streaming=null;
+    const reply=messages.findLast(m=>m.role==='assistant');
+    $('#status').textContent=reply?.stopReason==='aborted'?'Stopped':reply?.errorMessage||reply?.stopReason==='error'?'Attention needed':'Response complete';
+  }
   if(e.type==='agent_start'&&!running)setRunning(true);
   if(e.type==='stats'){stats=e.data;updateMetrics();}
   if(e.type==='chat_updated'){Object.assign(current,e.chat);$('#chat-title').textContent=current.title;renderSidebar();}
@@ -701,7 +706,28 @@ $('#add-project').onclick=()=>$('#project-dialog').showModal();
 $('#browse').onclick=async()=>{try{const r=await api('/pick-folder',{});if(r.path){$('#project-path').value=r.path;if(!$('#project-name').value)$('#project-name').value=r.path.split(/[\\/]/).at(-1);}}catch(e){toast(e.message);}};
 $('#project-form').onsubmit=async e=>{e.preventDefault();try{const p=await api('/projects',{name:$('#project-name').value,path:$('#project-path').value});config.projects.push(p);projectId=p.id;$('#project-dialog').close();renderSidebar();await newChat();}catch(e){$('#project-feedback').textContent=e.message;}};
 function renderFiles(){$('#attachments').innerHTML=files.map((f,i)=>`<div class="attachment" title="${esc(f.path||'Saved copy after sending')}">▧ ${esc(f.name)} · ${esc(f.path?(f.path.split(/[\\/]/).slice(-2,-1)[0]||f.path):'saved copy')} <button data-index="${i}" title="Remove attachment">✕</button></div>`).join('');$('#attachments').querySelectorAll('button').forEach(b=>b.onclick=()=>{files.splice(Number(b.dataset.index),1);renderFiles();});}
-async function addFiles(list){for(const f of list){if(f.size>8*1024*1024){toast(`${f.name}: maximum file size is 8 MB.`);continue;}const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=reject;r.readAsDataURL(f);});let filePath='';try{filePath=window.joltFiles?.pathFor(f)||'';}catch{}files.push({name:f.name||`pasted-image-${Date.now()}.${({'image/png':'png','image/jpeg':'jpg','image/webp':'webp','image/gif':'gif'})[f.type]||'bin'}`,type:f.type,data,path:filePath});}renderFiles();}
+async function addFiles(list){
+  const draft=files;
+  const errors=[];
+  for(const f of list){
+    if(!f)continue;
+    const name=f.name||`pasted-image-${Date.now()}.${imageExtensions[f.type]||'bin'}`;
+    const kind=attachmentKind(name,f.type);
+    if(!kind){errors.push(unsupportedAttachment(name));continue;}
+    if(f.size>8*1024*1024){errors.push(`${name}: maximum file size is 8 MB.`);continue;}
+    try{
+      const data=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result.split(',')[1]);r.onerror=reject;r.readAsDataURL(f);});
+      if(kind==='text'&&atob(data).includes('\0')){errors.push(`${name} is binary. Attach a text or source file.`);continue;}
+      let filePath='';
+      try{filePath=window.joltFiles?.pathFor(f)||'';}catch{}
+      draft.push({name,type:f.type,data,path:filePath});
+    }catch{errors.push(`Could not read ${name}.`);}
+  }
+  if(draft===files){
+    renderFiles();
+    if(errors.length)toast(errors.join(' '));
+  }
+}
 $('#attach').onclick=()=>$('#file-input').click();$('#file-input').onchange=async e=>{await addFiles(e.target.files);e.target.value='';};
 $('#prompt').onpaste=async e=>{const f=[...e.clipboardData.items].filter(i=>i.kind==='file').map(i=>i.getAsFile());if(f.length){e.preventDefault();await addFiles(f);}};
 document.body.ondragover=e=>e.preventDefault();document.body.ondrop=async e=>{e.preventDefault();await addFiles(e.dataTransfer.files);};

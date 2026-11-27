@@ -1,6 +1,12 @@
 # JoltDesk development handoff
 
-Updated November 26, 2026.
+Updated November 27, 2026.
+
+## Attachment preflight and Ornith image marker error (November 27, 2026)
+
+The Ornith ToRc process remained up, but the reply ended with the image marker error. The chat history contained five user image parts. The adjacent ToRc checkout's Qwen server takes the image rows out of the request state on first prompt expansion. After a reasoning cap, the same prompt can be expanded again with no rows. The proposed fix is to borrow the rows in `model/src/models/qwen/serve.rs` so both passes can use them. The ToRc edit was reverted and the test build removed at the user's request for a separate handoff. JoltDesk rejects unsupported files on selection, paste, or drop, validates again on the server, and keeps a provider error from turning into “Response complete” when the turn settles.
+
+Verification: JoltDesk `npm test` passed 63 with one existing skip. `node test/files-web-ui-check.mjs` passed, including immediate AVIF rejection and draft preservation. The proposed ToRc fix built and passed its five Qwen vision unit tests before it was removed. The running apps were left in place. Next: hand off the ToRc fix for isolated reasoning-cap verification with images, and verify the attachment behavior in the user's next JoltDesk build.
 
 ## Shell guard against stalled commands (November 26, 2026, 0.14.16)
 

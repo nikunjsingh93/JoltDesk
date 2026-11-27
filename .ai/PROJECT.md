@@ -42,6 +42,8 @@ npm run zip -- --arm64
 
 ## Durable decisions and pitfalls
 
+- Validate attachment types in both the composer and the WebSocket server through `public/attachment-types.mjs`. Unsupported files (such as AVIF) should warn on selection, paste, or drop, without adding a chip or clearing the draft.
+- When ToRc reports image markers with zero images in a chat with earlier images, check the Qwen reasoning-budget continuation. It reruns the prompt in the same request and needs the same embedded image rows each time. Consuming those rows on the first pass can produce the mismatch even though JoltDesk supplied images.
 - The supported release target is Windows ARM64. Electron is ARM64. The bundled upstream Windows x64 Pi-Bolt engine runs under Windows emulation. Verify both the packaged app and the embedded engine before releasing.
 - The JoltDesk rename keeps the old Windows app ID and opens existing Bolt Desktop data in place. Keeping the existing profile directory also keeps its encrypted credential store together. Fresh installations use `joltdesk`.
 - The Windows portable build registers the outer executable as its taskbar relaunch command and icon source before showing the window. Its temporary Electron executable is removed on exit. Pins made before this fix need to be recreated.

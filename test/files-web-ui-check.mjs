@@ -45,6 +45,14 @@ try{
   await expect(page.locator('#toast')).toContainText('Bypass active');
   if(!await page.locator('#work-panel').isVisible())await page.locator('#toggle-inspector').click();
 
+  await page.locator('#prompt').fill('Keep this draft.');
+  const requestCount=provider.requests.length;
+  await page.locator('#file-input').setInputFiles({name:'unsupported.avif',mimeType:'image/avif',buffer:Buffer.from('fixture')});
+  await expect(page.locator('#toast')).toContainText('unsupported.avif is unsupported');
+  await expect(page.locator('#attachments')).not.toContainText('unsupported.avif');
+  await expect(page.locator('#prompt')).toHaveValue('Keep this draft.');
+  assert.equal(provider.requests.length,requestCount);
+
   const send=async(text,previous=provider.requests.length)=>{
     await page.locator('#prompt').fill(text);
     await page.locator('#send').click();

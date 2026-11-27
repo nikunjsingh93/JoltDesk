@@ -12,6 +12,7 @@ import { completedMetrics } from './public/reply-metrics.mjs';
 import {makeRuntime,reduceBackground,collectInspector} from './public/chat-runtime.mjs';
 import { createCheckpoints } from './checkpoints.mjs';
 import { storeAttachment, archiveAttachments } from './attachments.mjs';
+import { attachmentKind, unsupportedAttachment } from './public/attachment-types.mjs';
 import { delegateTasks } from './subagents.mjs';
 import * as gitOps from './git.mjs';
 import { createTerminals } from './terminal.mjs';
@@ -831,10 +832,10 @@ export async function startServer({port=0,dataDir=path.join(root,'.bolt-data'),v
           for(const f of msg.files||[]){
             if(!f.name||typeof f.data!=='string')throw new Error('Invalid attachment');
             if(f.data.length>14000000)throw new Error('Attachment is too large.');
-            const image=['image/png','image/jpeg','image/webp','image/gif'].includes(f.type);
-            const textFile=f.type?.startsWith('text/')||/\.(md|json|js|ts|tsx|jsx|py|rs|go|java|c|cpp|h|css|html|xml|yaml|yml|toml|csv|log|sql|sh|txt)$/i.test(f.name);
+            const kind=attachmentKind(f.name,f.type);
+            if(!kind)throw new Error(unsupportedAttachment(f.name));
+            const image=kind==='image';
             if(image&&!model.input?.includes('image'))throw new Error('This model does not support image attachments. Choose a model that accepts images.');
-            if(!image&&!textFile)throw new Error('MVP attachments support text, source code, and images. PDF/Office support is not implemented yet.');
             const bytes=Buffer.from(f.data,'base64');
             const text=bytes.toString('utf8');if(!image&&text.includes('\0'))throw new Error('Binary files are not supported.');
             const stored=await storeAttachment({cwd:chatCwd(chat),chatId:id,name:f.name,type:f.type,data:f.data,originalPath:f.path});
